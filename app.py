@@ -35,29 +35,34 @@ def detectar_simbolos(image_bytes):
     cv2.line(img_debug, (cx, 0), (cx, alto), (255, 0, 0), 1)
 
     # --- B. AISLAR EL ÁREA DEL CAMPO VISUAL ---
-    # Encontramos hasta dónde llega el eje horizontal para saber el radio del campo
     pixeles_eje_x = np.where(thresh[cy, :] > 0)[0]
     if len(pixeles_eje_x) > 0:
         radio_campo = int(max(cx - pixeles_eje_x[0], pixeles_eje_x[-1] - cx) * 1.05)
     else:
         radio_campo = int(min(ancho, alto) * 0.4)
 
-    # Crear una máscara circular para borrar los textos de afuera
     mascara_circular = np.zeros_like(thresh)
     cv2.circle(mascara_circular, (cx, cy), radio_campo, 255, -1)
     campo_limpio = cv2.bitwise_and(thresh, mascara_circular)
 
-    # --- C. DETECCIÓN DE SÍMBOLOS (MUESTREO DE NÚCLEO) ---
+    # --- C. DETECCIÓN DE SÍMBOLOS CON LIMPIEZA QUIRÚRGICA DE EJE ---
     
-    # Borramos temporalmente las líneas rectas de la grilla para separar los símbolos
+    # Encontramos las líneas rectas puras de la grilla
     kernel_h = cv2.getStructuringElement(cv2.MORPH_RECT, (int(ancho*0.03), 1))
     kernel_v = cv2.getStructuringElement(cv2.MORPH_RECT, (1, int(alto*0.03)))
     lineas_h = cv2.morphologyEx(campo_limpio, cv2.MORPH_OPEN, kernel_h)
     lineas_v = cv2.morphologyEx(campo_limpio, cv2.MORPH_OPEN, kernel_v)
-    grilla = cv2.add(lineas_h, lineas_v)
-    grilla_engrosada = cv2.dilate(grilla, np.ones((3,3), np.uint8))
     
-    # Restamos la grilla
+    # MEJORA: Engrosamiento asimétrico dirigido para barrer cruces/ticks de la regla
+    # Usamos un "borrador" vertical para la línea horizontal
+    grilla_h_ancha = cv2.dilate(lineas_h, np.ones((int(alto*0.005), 1), np.uint8)) 
+    # Usamos un "borrador" horizontal para la línea vertical
+    grilla_v_ancha = cv2.dilate(lineas_v, np.ones((1, int(ancho*0.005)), np.uint8)) 
+    
+    # Combinamos para obtener la grilla engrosada (Borrador completo anti-regla)
+    grilla_engrosada = cv2.add(grilla_h_ancha, grilla_v_ancha)
+    
+    # Restamos la grilla y los ticks
     simbolos_separados = cv2.subtract(campo_limpio, grilla_engrosada)
     
     # Pequeña dilatación para unir símbolos que hayan sido cortados por la resta
@@ -103,10 +108,10 @@ def detectar_simbolos(image_bytes):
     return img_debug, cuadrados_encontrados, circulos_encontrados
 
 # --- INTERFAZ ---
-archivo = st.file_uploader("Sube un estudio de CVC para testear la detección pura", type=["jpg", "jpeg", "png"])
+archivo = st.file_uploader("Sube un estudio de CVC para testear la detección pura (Anti-ticks)", type=["jpg", "jpeg", "png"])
 
 if archivo is not None:
-    with st.spinner("Escaneando imagen original..."):
+    with st.spinner("Escaneando imagen original con filtro de ejes..."):
         img_res, total_cuadrados, total_circulos = detectar_simbolos(archivo.getvalue())
         
         col1, col2 = st.columns([3, 1])
@@ -121,3 +126,4 @@ if archivo is not None:
             st.write("1. Cruz azul en el centro exacto.")
             st.write("2. Cuadrados encerrados en ROJO.")
             st.write("3. Círculos encerrados en VERDE.")
+            st.write("4. Las marcas de la regla (ticks) en los ejes deberían estar ignoradas.")
