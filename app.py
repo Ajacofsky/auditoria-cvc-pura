@@ -3,127 +3,178 @@ import cv2
 import numpy as np
 from PIL import Image
 
-st.set_page_config(page_title="Detector Base de CVC", layout="wide")
+st.set_page_config(page_title="Auditoría CVC Pura: Motor de Detección Pro", layout="wide")
 
-st.title("🔬 Módulo de Prueba: Detección Pura de Símbolos")
-st.markdown("Este módulo contiene exclusivamente el Motor de Detección. Evalúa los cuadrados (Rojos) y los círculos (Verdes) sin aplicar grillas ni cálculos de incapacidad.")
+st.title("🔬 Módulo de Auditoría CVC Pura")
+st.markdown("""
+Esta herramienta ejecuta el **Motor de Detección Pura de Grado Pericial**. 
+Su única función es escanear la hoja completa, ignorar la regla de los ejes y aislar todos los símbolos para auditoría visual.
+- Cruz Azul = Centro Exacto.
+- Bounding Box **Rojo** = Cuadrado (Fallado).
+- Bounding Box **Verde** = Círculo (Visto).
+""")
 
-def detectar_simbolos(image_bytes):
-    # 1. Cargar imagen y convertir a escala de grises
-    nparr = np.frombuffer(image_bytes, np.uint8)
-    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    img_debug = img.copy()
-    
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    
-    # 2. Binarización (Tinta negra = Blanco 255, Papel = Negro 0)
-    _, thresh = cv2.threshold(gray, 180, 255, cv2.THRESH_BINARY_INV)
+# ==========================================
+# FUNCIONES DE VISIÓN (MOTOR PRO)
+# ==========================================
+
+def find_and_clean_axes(thresh):
+    """
+    Encuentra los ejes, los extrae limpiamente y crea un borrador asimétrico 
+    para barrer los ticks.
+    """
     alto, ancho = thresh.shape
     
-    # --- A. ENCONTRAR EL CENTRO EXACTO (MÉTODO DE PROYECCIÓN) ---
-    # Ignoramos el 25% superior e inferior para que el texto/leyenda no interfiera
+    # Encontrar centro por proyección (ignorar leyenda inferior)
     zona_media_y = thresh[int(alto*0.25):int(alto*0.75), :]
-    suma_filas = np.sum(zona_media_y, axis=1)
-    cy = np.argmax(suma_filas) + int(alto*0.25) # La fila con más tinta es el eje X
+    cy = np.argmax(np.sum(zona_media_y, axis=1)) + int(alto*0.25)
     
     zona_media_x = thresh[:, int(ancho*0.25):int(ancho*0.75)]
-    suma_columnas = np.sum(zona_media_x, axis=0)
-    cx = np.argmax(suma_columnas) + int(ancho*0.25) # La columna con más tinta es el eje Y
+    cx = np.argmax(np.sum(zona_media_x, axis=0)) + int(ancho*0.25)
     
-    # Dibujar cruz AZUL para demostrar que encontramos el centro real
-    cv2.line(img_debug, (0, cy), (ancho, cy), (255, 0, 0), 1)
-    cv2.line(img_debug, (cx, 0), (cx, alto), (255, 0, 0), 1)
+    # EXTRAER LÍNEAS DE EJES PURAS (Erosión Estricta Dirigida)
+    # Usamos kernels largos para identificar líneas continuas
+    k_len = max(20, int(ancho * 0.1))
+    kernel_h_clean = cv2.getStructuringElement(cv2.MORPH_RECT, (k_len, 1))
+    lineas_h_puras = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel_h_clean)
+    
+    k_len_v = max(20, int(alto * 0.1))
+    kernel_v_clean = cv2.getStructuringElement(cv2.MORPH_RECT, (1, k_len_v))
+    lineas_v_puras = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel_v_clean)
+    
+    # BORRADOR DE EJES (Engrosamiento Asimétrico Progresivo)
+    # 1. Unimos las líneas puras
+    ejes_unidos = cv2.add(lineas_h_puras, lineas_v_puras)
+    
+    # 2. Dilatación asimétrica dirigida para "barrer" ticks perpendicularmente
+    borrador_h_ticks = cv2.dilate(lineas_h_puras, np.ones((int(alto*0.015), 1), np.uint8))
+    borrador_v_ticks = cv2.dilate(lineas_v_puras, np.ones((1, int(ancho*0.015)), np.uint8))
+    
+    # Combinamos para obtener el borrador final anti-ticks
+    borrador_anti_regla = cv2.add(borrador_h_ticks, borrador_v_ticks)
+    
+    return (cx, cy), borrador_anti_regla
 
-    # --- B. AISLAR EL ÁREA DEL CAMPO VISUAL ---
-    pixeles_eje_x = np.where(thresh[cy, :] > 0)[0]
-    if len(pixeles_eje_x) > 0:
-        radio_campo = int(max(cx - pixeles_eje_x[0], pixeles_eje_x[-1] - cx) * 1.05)
+
+def classify_symbol(roi_bin):
+    """
+    Clasifica un símbolo binarizado usando la regla de la erosión destructiva.
+    """
+    h, w = roi_bin.shape
+    
+    # 1. Filtro de ruido previo: Si el símbolo es demasiado pequeño para ser nada, ignorar
+    if cv2.countNonZero(roi_bin) < 5:
+        return 'ignorar'
+    
+    # 2. Erosión Destructiva
+    k_size = max(2, int(min(w, h) * 0.40))
+    kernel_erosion = np.ones((k_size, k_size), np.uint8)
+    eroded_roi = cv2.erode(roi_bin, kernel_erosion, iterations=1)
+    
+    # 3. Clasificación estricta: No basta con sobrevivir, debe tener un núcleo
+    nucleo_area = cv2.countNonZero(eroded_roi)
+    if nucleo_area / (float(h*w)) > 0.05: # >5% del área original debe sobrevivir
+        return 'fallado'  # Sobrevivió = Bloque sólido
     else:
-        radio_campo = int(min(ancho, alto) * 0.4)
+        return 'visto'    # Se borró o núcleo insignificante = Línea hueca
 
-    mascara_circular = np.zeros_like(thresh)
-    cv2.circle(mascara_circular, (cx, cy), radio_campo, 255, -1)
-    campo_limpio = cv2.bitwise_and(thresh, mascara_circular)
 
-    # --- C. DETECCIÓN DE SÍMBOLOS CON LIMPIEZA QUIRÚRGICA DE EJE ---
+def detect_and_classify_symbols(img_bin, borrador_anti_regla):
+    """
+    Aísla los símbolos, los clasifica y dibuja los resultados de auditoría.
+    """
+    alto, ancho = img_bin.shape
+    img_auditoria = np.zeros((alto, ancho, 3), dtype=np.uint8) # Imagen de salida en color
+    img_auditoria[:,:] = [255, 255, 255] # Fondo blanco
     
-    # Encontramos las líneas rectas puras de la grilla
-    kernel_h = cv2.getStructuringElement(cv2.MORPH_RECT, (int(ancho*0.03), 1))
-    kernel_v = cv2.getStructuringElement(cv2.MORPH_RECT, (1, int(alto*0.03)))
-    lineas_h = cv2.morphologyEx(campo_limpio, cv2.MORPH_OPEN, kernel_h)
-    lineas_v = cv2.morphologyEx(campo_limpio, cv2.MORPH_OPEN, kernel_v)
-    
-    # MEJORA: Engrosamiento asimétrico dirigido para barrer cruces/ticks de la regla
-    # Usamos un "borrador" vertical para la línea horizontal
-    grilla_h_ancha = cv2.dilate(lineas_h, np.ones((int(alto*0.005), 1), np.uint8)) 
-    # Usamos un "borrador" horizontal para la línea vertical
-    grilla_v_ancha = cv2.dilate(lineas_v, np.ones((1, int(ancho*0.005)), np.uint8)) 
-    
-    # Combinamos para obtener la grilla engrosada (Borrador completo anti-regla)
-    grilla_engrosada = cv2.add(grilla_h_ancha, grilla_v_ancha)
-    
-    # Restamos la grilla y los ticks
-    simbolos_separados = cv2.subtract(campo_limpio, grilla_engrosada)
+    # Restamos la grilla y los ticks limpios
+    campo_limpio = cv2.subtract(img_bin, borrador_anti_regla)
     
     # Pequeña dilatación para unir símbolos que hayan sido cortados por la resta
-    simbolos_unidos = cv2.dilate(simbolos_separados, np.ones((2,2), np.uint8))
+    simbolos_unidos = cv2.dilate(campo_limpio, np.ones((2,2), np.uint8))
     
-    contornos, _ = cv2.findContours(simbolos_unidos, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    # Componentes Conectados (más rápido que findContours)
+    cuadrados_count = 0
+    circulos_count = 0
+    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(simbolos_unidos, connectivity=8)
     
-    # Filtros de tamaño dinámicos basados en la resolución de la imagen
+    # Filtros de tamaño dinámicos
     area_min = (ancho * 0.002) ** 2
     area_max = (ancho * 0.02) ** 2
     
-    cuadrados_encontrados = 0
-    circulos_encontrados = 0
-    
-    for cnt in contornos:
-        x, y, w, h = cv2.boundingRect(cnt)
-        area = w * h
+    for i in range(1, num_labels): # 0 es el fondo
+        x, y, w, h = stats[i, cv2.CC_STAT_LEFT], stats[i, cv2.CC_STAT_TOP], \
+                     stats[i, cv2.CC_STAT_WIDTH], stats[i, cv2.CC_STAT_HEIGHT]
+        area = stats[i, cv2.CC_STAT_AREA]
         
         # Si tiene el tamaño de un símbolo...
-        if area_min < area < area_max:
-            # Miramos el recuadro en la imagen ORIGINAL binarizada (campo_limpio)
+        if area_min < area < area_max and 0.4 < (w/float(h)) < 2.5:
+            # ROI en la imagen LIMPIA (sin líneas ni ticks)
             roi = campo_limpio[y:y+h, x:x+w]
             
-            # Extraemos el "corazón" del símbolo (el 40% del centro exacto)
-            y1_core, y2_core = int(h*0.3), int(h*0.7)
-            x1_core, x2_core = int(w*0.3), int(w*0.7)
+            tipo = classify_symbol(roi)
             
-            if y2_core > y1_core and x2_core > x1_core:
-                corazon = roi[y1_core:y2_core, x1_core:x2_core]
-                
-                # ¿Qué porcentaje del corazón es tinta negra?
-                porcentaje_tinta_corazon = np.sum(corazon > 0) / float(corazon.size)
-                
-                # Si el corazón es macizo (más del 55% de tinta)...
-                if porcentaje_tinta_corazon > 0.55:
-                    cuadrados_encontrados += 1
-                    cv2.rectangle(img_debug, (x, y), (x+w, y+h), (0, 0, 255), 2) # Caja Roja
-                else:
-                    # Si el corazón está vacío (papel blanco)...
-                    circulos_encontrados += 1
-                    cv2.rectangle(img_debug, (x, y), (x+w, y+h), (0, 255, 0), 1) # Caja Verde
+            if tipo == 'fallado':
+                cuadrados_count += 1
+                cv2.rectangle(img_auditoria, (x, y), (x+w, y+h), (0, 0, 255), 2) # Caja Roja
+            elif tipo == 'visto':
+                circulos_count += 1
+                cv2.rectangle(img_auditoria, (x, y), (x+w, y+h), (0, 255, 0), 1) # Caja Verde
 
-    return img_debug, cuadrados_encontrados, circulos_encontrados
+    return img_auditoria, cuadrados_count, circulos_count
 
-# --- INTERFAZ ---
-archivo = st.file_uploader("Sube un estudio de CVC para testear la detección pura (Anti-ticks)", type=["jpg", "jpeg", "png"])
+# ==========================================
+# INTERFAZ WEB (`app.py`)
+# ==========================================
+
+archivo = st.file_uploader("Sube un estudio de CVC para testear la detección pura (Anti-ticks PRO)", type=["jpg", "jpeg", "png"])
 
 if archivo is not None:
-    with st.spinner("Escaneando imagen original con filtro de ejes..."):
-        img_res, total_cuadrados, total_circulos = detectar_simbolos(archivo.getvalue())
+    with st.spinner("Ejecutando escaneo progresivo anti-ticks..."):
         
+        # 1. Carga y preprocesamiento base
+        nparr = np.frombuffer(archivo.getvalue(), np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        _, thresh = cv2.threshold(gray, 180, 255, cv2.THRESH_BINARY_INV)
+        alto, ancho = thresh.shape
+
+        # 2. LIMPIEZA DE EJES
+        centro, borrador_anti_regla = find_and_clean_axes(thresh)
+        
+        # 3. DETECCIÓN Y CLASIFICACIÓN PRO
+        img_auditoria_bin, t_cuad, t_circ = detect_and_classify_symbols(thresh, borrador_anti_regla)
+        
+        # 4. Fusión visual (Dibujar resultados sobre la imagen original)
+        img_final = img.copy()
+        for i in range(3):
+            mask = img_auditoria_bin[:,:,i] != 255
+            img_final[mask, i] = img_auditoria_bin[mask, i]
+            
+        # Dibujar centro
+        cv2.line(img_final, (0, centro[1]), (ancho, centro[1]), (255, 0, 0), 1)
+        cv2.line(img_final, (centro[0], 0), (centro[0], alto), (255, 0, 0), 1)
+
+        # MOSTRAR RESULTADOS EN INTERFAZ
         col1, col2 = st.columns([3, 1])
         with col1:
-            img_rgb = cv2.cvtColor(img_res, cv2.COLOR_BGR2RGB)
-            st.image(Image.fromarray(img_rgb), caption="Auditoría Visual (Cruz Azul = Centro)", use_container_width=True)
+            img_rgb = cv2.cvtColor(img_final, cv2.COLOR_BGR2RGB)
+            st.image(Image.fromarray(img_rgb), caption="Auditoría Visual PRO (Ejes Ignorados)", use_container_width=True)
         with col2:
-            st.metric("Cuadrados (Rojos)", total_cuadrados)
-            st.metric("Círculos (Verdes)", total_circulos)
+            st.markdown("---")
+            st.markdown("### 🔬 Resultados de Auditoría Pura")
+            
+            # Gráfico de barras simple para distribución
+            data = {"Cuadrados (Fallados)": t_cuad, "Círculos (Vistos)": t_circ}
+            st.bar_chart(data)
+            
+            st.metric("Cuadrados (Rojos)", t_cuad)
+            st.metric("Círculos (Verdes)", t_circ)
             st.write("---")
-            st.write("**Modo de Auditoría:**")
-            st.write("1. Cruz azul en el centro exacto.")
-            st.write("2. Cuadrados encerrados en ROJO.")
-            st.write("3. Círculos encerrados en VERDE.")
-            st.write("4. Las marcas de la regla (ticks) en los ejes deberían estar ignoradas.")
+            st.markdown("""
+            **Verificación Visual:**
+            1. Cruz azul en el centro exacto.
+            2. Cuadrados encerrados en ROJO.
+            3. Círculos encerrados en VERDE.
+            **4. Las marcas de la regla (ticks) en los ejes están aniquiladas.**
+            """)
