@@ -2,14 +2,11 @@ import streamlit as st
 import cv2
 import numpy as np
 import math
-import re
 import base64
 import os
 import tempfile
-from datetime import datetime
 from PIL import Image
 from fpdf import FPDF
-import pytesseract
 
 st.set_page_config(page_title="Calculadora Pericial CVC", layout="wide")
 
@@ -17,33 +14,9 @@ st.title("⚖️ Calculadora Pericial CVC (Área Central 40°)")
 st.markdown("""
 **Suite de Dictamen Médico-Legal**
 - Motor de detección blindado (Universo de 104 puntos).
-- Lector óptico de datos y Reporte fotográfico de 1 página.
+- Reporte Fotográfico 100% fiel al documento original.
+- Exportación a PDF en una sola página.
 """)
-
-# ==========================================
-# 🔒 MOTOR DE LECTURA (OCR MEJORADO)
-# ==========================================
-def extraer_nombre(img_gray):
-    """Escanea el encabezado intentando salvar el formato de matriz de puntos."""
-    try:
-        alto, ancho = img_gray.shape
-        header_img = img_gray[0:int(alto*0.20), :]
-        
-        # Binarización Otsu para mejorar contraste de letras borrosas
-        _, thresh_ocr = cv2.threshold(header_img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        
-        texto = pytesseract.image_to_string(thresh_ocr, config='--psm 6')
-        
-        # Buscar NOMBRE y agarrar letras/espacios hasta toparse con doble espacio o palabras clave
-        match = re.search(r'NOMBRE[\s:.]+([A-Z\s]+?)(?:\s{2,}|\n|DERECHO|IZQUIERDO|ID)', texto, re.IGNORECASE)
-        if match:
-            nombre_limpio = match.group(1).strip()
-            # Eliminar basura si leyó mal
-            nombre_limpio = re.sub(r'[^A-Z\s]', '', nombre_limpio) 
-            return nombre_limpio
-        return ""
-    except Exception as e:
-        return ""
 
 # ==========================================
 # 🔒 MOTOR DE VISIÓN BLINDADO 
@@ -113,63 +86,50 @@ def detect_and_classify_symbols(img_bin, borrador_anti_regla, centro, pixels_por
     return img_auditoria, cuadrados_count, circulos_count
 
 # ==========================================
-# GENERADOR DE PDF (CON IMAGEN INTEGRADA)
+# GENERADOR DE PDF (DISEÑO FOTOGRÁFICO LIMPIO)
 # ==========================================
-def generar_pdf_moderno(nombre_paciente, incap_od, grados_od, img_od, incap_oi, grados_oi, img_oi, incap_total, modo):
+def generar_pdf_moderno(incap_od, grados_od, img_od_orig, incap_oi, grados_oi, img_oi_orig, incap_total, modo):
     pdf = FPDF()
     pdf.add_page()
     
-    # 1. ENCABEZADO MODERNO
+    # 1. ENCABEZADO
     pdf.set_fill_color(41, 64, 115) 
     pdf.set_text_color(255, 255, 255)
     pdf.set_font("Arial", 'B', 15)
-    pdf.cell(0, 16, "  DICTAMEN PERICIAL - CAMPO VISUAL COMPUTARIZADO", 0, 1, 'L', fill=True)
-    pdf.ln(5)
-    
-    # 2. DATOS DEL PACIENTE
-    pdf.set_fill_color(240, 240, 240)
-    pdf.set_text_color(0, 0, 0)
-    pdf.set_font("Arial", 'B', 11)
-    pdf.cell(30, 10, " Paciente:", 0, 0, 'L', fill=True)
-    pdf.set_font("Arial", '', 11)
-    
-    nombre_mostrar = nombre_paciente.upper() if nombre_paciente.strip() else "NO ESPECIFICADO"
-    pdf.cell(90, 10, f" {nombre_mostrar}", 0, 0, 'L', fill=True)
-    
-    pdf.set_font("Arial", 'B', 11)
-    pdf.cell(20, 10, " Fecha:", 0, 0, 'L', fill=True)
-    pdf.set_font("Arial", '', 11)
-    pdf.cell(0, 10, f" {datetime.now().strftime('%d/%m/%Y')}", 0, 1, 'L', fill=True)
-    
-    pdf.set_draw_color(200, 200, 200)
-    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+    pdf.cell(0, 16, "  DICTAMEN PERICIAL - CAMPO VISUAL COMPUTARIZADO", 0, 1, 'C', fill=True)
     pdf.ln(5)
 
-    # 3. IMÁGENES DEL CAMPO VISUAL
+    # 2. IMÁGENES ORIGINALES (Sin marcas, escala reducida para evitar solapamientos)
     y_images = pdf.get_y()
+    
     if modo == "Bilateral (OD y OI)":
-        # Guardar temporalmente las imágenes en disco para que el PDF pueda leerlas
-        if img_od is not None:
+        if img_od_orig is not None:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp_od:
-                cv2.imwrite(tmp_od.name, img_od)
-                pdf.image(tmp_od.name, x=15, y=y_images, w=85) # Ojo Derecho
+                cv2.imwrite(tmp_od.name, img_od_orig)
+                # Ojo Derecho a la izquierda (Ancho 95, altura auto-ajustada)
+                pdf.image(tmp_od.name, x=10, y=y_images, w=90) 
             os.remove(tmp_od.name)
-        if img_oi is not None:
+        if img_oi_orig is not None:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp_oi:
-                cv2.imwrite(tmp_oi.name, img_oi)
-                pdf.image(tmp_oi.name, x=110, y=y_images, w=85) # Ojo Izquierdo
+                cv2.imwrite(tmp_oi.name, img_oi_orig)
+                # Ojo Izquierdo a la derecha
+                pdf.image(tmp_oi.name, x=110, y=y_images, w=90) 
             os.remove(tmp_oi.name)
-        pdf.set_y(y_images + 65) # Mover el cursor debajo de las imágenes
+        # Bajamos el cursor Y para que el texto empiece debajo de las fotos (Aprox 75mm)
+        pdf.set_y(y_images + 80) 
     else:
-        img_val = img_od if img_od is not None else img_oi
+        img_val = img_od_orig if img_od_orig is not None else img_oi_orig
         if img_val is not None:
             with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
                 cv2.imwrite(tmp.name, img_val)
-                pdf.image(tmp.name, x=55, y=y_images, w=100) # Imagen centrada
+                # Una sola imagen, centrada y un poco más grande (Ancho 130)
+                pdf.image(tmp.name, x=40, y=y_images, w=130) 
             os.remove(tmp.name)
-        pdf.set_y(y_images + 75)
+        # Bajamos el cursor Y (Aprox 100mm)
+        pdf.set_y(y_images + 105)
 
-    # 4. RESULTADOS MATEMÁTICOS
+    # 3. RESULTADOS MATEMÁTICOS (Separados de las imágenes)
+    pdf.set_text_color(0, 0, 0)
     pdf.set_font("Arial", 'B', 14)
     pdf.cell(0, 10, "RESULTADOS DE LA EVALUACION (AREA 40 GRADOS)", 0, 1, 'L')
     pdf.ln(2)
@@ -192,7 +152,7 @@ def generar_pdf_moderno(nombre_paciente, incap_od, grados_od, img_od, incap_oi, 
         pdf.cell(0, 8, f"   - Incapacidad Unilateral:    {incap_oi:.2f}%", 0, 1)
         pdf.ln(2)
         
-    # 5. INCAPACIDAD TOTAL
+    # 4. INCAPACIDAD TOTAL
     pdf.ln(5)
     pdf.set_font("Arial", 'B', 14)
     if modo == "Bilateral (OD y OI)":
@@ -205,7 +165,7 @@ def generar_pdf_moderno(nombre_paciente, incap_od, grados_od, img_od, incap_oi, 
         val = incap_od if incap_od > 0 else incap_oi
         pdf.cell(0, 14, f" INCAPACIDAD UNILATERAL DEFINITIVA: {val:.2f}%", 0, 1, 'C', fill=True)
         
-    # 6. FIRMA
+    # 5. FIRMA (Garantizada al final de la página)
     pdf.set_text_color(0, 0, 0)
     pdf.ln(25)
     pdf.set_draw_color(0, 0, 0)
@@ -220,42 +180,37 @@ def generar_pdf_moderno(nombre_paciente, incap_od, grados_od, img_od, incap_oi, 
 # INTERFAZ WEB (`app.py`)
 # ==========================================
 
-# Memoria temporal para el nombre
-if "nombre_ocr" not in st.session_state:
-    st.session_state.nombre_ocr = ""
-
 modo_evaluacion = st.radio("Seleccione el Tipo de Evaluación:", ["Unilateral (1 Ojo)", "Bilateral (OD y OI)"], horizontal=True)
 st.divider()
 
 def procesar_panel_ojo(titulo_ojo, key_suffix):
     archivo = st.file_uploader(f"Subir estudio - {titulo_ojo}", type=["jpg", "jpeg", "png"], key=f"file_{key_suffix}")
-    incapacidad_final, grados_finales, img_final = 0.0, 0.0, None
+    incapacidad_final, grados_finales, img_original = 0.0, 0.0, None
     
     if archivo is not None:
         with st.spinner(f"Escaneando {titulo_ojo}..."):
             nparr = np.frombuffer(archivo.getvalue(), np.uint8)
             img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            
+            # GUARDAMOS LA IMAGEN ORIGINAL INTACTA PARA EL PDF
+            img_original = img.copy()
+            
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             _, thresh = cv2.threshold(gray, 180, 255, cv2.THRESH_BINARY_INV)
-            
-            # Intento de lectura óptica automática
-            if st.session_state.nombre_ocr == "":
-                nombre_detectado = extraer_nombre(gray)
-                if nombre_detectado:
-                    st.session_state.nombre_ocr = nombre_detectado
             
             centro, borrador_anti_regla, dist_60 = find_and_clean_axes(thresh)
             pixels_por_10_grados = float(dist_60 / 6.0)
             
             img_auditoria_bin, t_cuad, t_circ = detect_and_classify_symbols(thresh, borrador_anti_regla, centro, pixels_por_10_grados)
             
-            img_final = img.copy()
+            # IMAGEN CON CAJITAS SOLO PARA MOSTRAR EN PANTALLA
+            img_pantalla = img.copy()
             for i in range(3):
                 mask = img_auditoria_bin[:,:,i] != 255
-                img_final[mask, i] = img_auditoria_bin[mask, i]
-            cv2.circle(img_final, centro, int(4.0 * pixels_por_10_grados), (0, 165, 255), 3)
+                img_pantalla[mask, i] = img_auditoria_bin[mask, i]
+            cv2.circle(img_pantalla, centro, int(4.0 * pixels_por_10_grados), (0, 165, 255), 3)
 
-            st.image(Image.fromarray(cv2.cvtColor(img_final, cv2.COLOR_BGR2RGB)), caption=f"Auditoría {titulo_ojo}", use_container_width=True)
+            st.image(Image.fromarray(cv2.cvtColor(img_pantalla, cv2.COLOR_BGR2RGB)), caption=f"Auditoría Visual {titulo_ojo}", use_container_width=True)
             
             st.markdown(f"**Corrección Pericial**")
             col_a, col_b = st.columns(2)
@@ -269,18 +224,18 @@ def procesar_panel_ojo(titulo_ojo, key_suffix):
             
             st.metric(f"Incapacidad {titulo_ojo}", f"{incapacidad_final:.2f}%")
             
-    return incapacidad_final, grados_finales, img_final
+    return incapacidad_final, grados_finales, img_original
 
 # Layout
 if modo_evaluacion == "Unilateral (1 Ojo)":
-    incap_od, grados_od, img_od = procesar_panel_ojo("Ojo Evaluado", "unico")
-    incap_oi, grados_oi, img_oi = 0.0, 0.0, None
+    incap_od, grados_od, img_od_orig = procesar_panel_ojo("Ojo Evaluado", "unico")
+    incap_oi, grados_oi, img_oi_orig = 0.0, 0.0, None
 else:
     col_izq, col_der = st.columns(2)
     with col_izq:
-        incap_od, grados_od, img_od = procesar_panel_ojo("Ojo Derecho (OD)", "od")
+        incap_od, grados_od, img_od_orig = procesar_panel_ojo("Ojo Derecho (OD)", "od")
     with col_der:
-        incap_oi, grados_oi, img_oi = procesar_panel_ojo("Ojo Izquierdo (OI)", "oi")
+        incap_oi, grados_oi, img_oi_orig = procesar_panel_ojo("Ojo Izquierdo (OI)", "oi")
 
 st.divider()
 
@@ -289,8 +244,8 @@ st.divider()
 # ==========================================
 st.header("📋 Dictamen Legal y Exportación")
 
-# La caja de texto siempre muestra el nombre detectado o el que tú escribas
-nombre_final = st.text_input("Nombre del Paciente:", value=st.session_state.nombre_ocr)
+# Campo simple solo para nombrar el archivo al guardarlo en Windows/Mac
+nombre_archivo_input = st.text_input("Nombre para el archivo PDF (opcional):", placeholder="Ej: Pollero_Juan")
 
 incap_total_bilateral = 0.0
 
@@ -308,13 +263,13 @@ else:
 
 if incap_od > 0 or incap_oi > 0:
     
-    nombre_archivo = nombre_final.strip().replace(" ", "_") if nombre_final.strip() else "Paciente"
+    nombre_archivo = nombre_archivo_input.strip().replace(" ", "_") if nombre_archivo_input.strip() else "Dictamen"
         
-    # Ahora enviamos las imágenes (img_od, img_oi) al generador de PDF
-    b64_pdf = generar_pdf_moderno(nombre_final, incap_od, grados_od, img_od, incap_oi, grados_oi, img_oi, incap_total_bilateral, modo_evaluacion)
+    # Generamos el PDF pasando las imágenes ORIGINALES (limpias)
+    b64_pdf = generar_pdf_moderno(incap_od, grados_od, img_od_orig, incap_oi, grados_oi, img_oi_orig, incap_total_bilateral, modo_evaluacion)
     
     html_btn = f'''
-    <a href="data:application/pdf;base64,{b64_pdf}" download="Dictamen_{nombre_archivo}.pdf" style="display: block; padding: 15px; background-color: #2980b9; color: white; text-align: center; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 18px; margin-top: 20px;">
+    <a href="data:application/pdf;base64,{b64_pdf}" download="Dictamen_Pericial_{nombre_archivo}.pdf" style="display: block; padding: 15px; background-color: #2980b9; color: white; text-align: center; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 18px; margin-top: 20px;">
         📥 DESCARGAR INFORME PERICIAL PDF
     </a>
     '''
