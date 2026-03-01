@@ -1,123 +1,186 @@
+¡Tienes toda la razón del mundo y te pido mil disculpas! Me pasé de "creativo" intentando salvar esos 4 puntos rebeldes y, al mezclar los códigos, le quité el "escudo de 40 grados" que ya habíamos logrado, provocando que volviera a leer todo el texto de la hoja. Un desastre total.
+
+Como peritos, la regla de oro es clara: lo que funciona y es robusto, no se toca. Es preferible perder 4 puntos en el eje que tener una máquina inestable que lee letras como si fueran daños visuales.
+
+Vamos a hacer exactamente lo que dices: dar un paso atrás y restaurar la versión "Motor 104". Esa versión era una roca: trazaba el anillo naranja perfecto, ignoraba el texto exterior y calculaba la matemática de la incapacidad de forma brillante.
+
+Aquí tienes exactamente el código de esa versión estable (sin inventos nuevos).
+
+Cópialo, guárdalo en tu Bloc de Notas como app.py, súbelo a GitHub y volvamos a tener la herramienta funcionando al 100%:
+
+Python
 import streamlit as st
 import cv2
 import numpy as np
 import math
 from PIL import Image
 
-st.set_page_config(page_title="Detector de CVC PRO: Motor Oro v2", layout="wide")
+st.set_page_config(page_title="Calculadora Pericial CVC: Motor 104", layout="wide")
 
-st.title("🔬 Módulo de Prueba: Detección Pura (Anti-ticks PRO)")
+st.title("⚖️ Calculadora Pericial CVC (Área Central 40°)")
 st.markdown("""
-**Programa Activo:** Motor de Detección Núcleo-Físico con **Borrador Asimétrico Mágico de Ejes**.
-Su única función es escanear la hoja completa, ignorar la regla de los ejes y aislar todos los símbolos para auditoría visual.
-- Cruz Azul = Centro Exacto.
-- Bounding Box **Rojo** = Cuadrado (Fallado).
-- Bounding Box **Verde** = Círculo (Visto).
-- Las marcas de la regla impresa (ticks) están barridas asimétricamente.
+**Motor de Detección de Grado Médico**
+Aísla la zona central y evalúa matemáticamente **ÚNICAMENTE los símbolos dentro de los 40 grados (Universo de 104 puntos)**.
+- **Cruz Azul:** Centro Exacto de Fijación.
+- **Anillo Naranja:** Límite Pericial de 40 Grados.
+- **Caja Roja:** Punto Fallado.
+- **Caja Verde:** Punto Visto.
 """)
 
-def detectar_simbolos(image_bytes):
-    # 1. Cargar imagen y convertir a escala de grises
-    nparr = np.frombuffer(image_bytes, np.uint8)
-    img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    img_debug = img.copy()
-    
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    
-    # 2. Binarización (Tinta negra = Blanco 255, Papel = Negro 0)
-    _, thresh = cv2.threshold(gray, 180, 255, cv2.THRESH_BINARY_INV)
+# ==========================================
+# FUNCIONES DE VISIÓN (RADAR 40°)
+# ==========================================
+
+def find_and_clean_axes(thresh):
     alto, ancho = thresh.shape
     
-    # --- A. ENCONTRAR EL CENTRO EXACTO (MÉTODO DE PROYECCIÓN) ---
-    # Ignoramos el 25% superior e inferior para que el texto/leyenda no interfiera
     zona_media_y = thresh[int(alto*0.25):int(alto*0.75), :]
-    cy = np.argmax(np.sum(zona_media_y, axis=1)) + int(alto*0.25) # Fila con más tinta (Eje X)
+    cy = np.argmax(np.sum(zona_media_y, axis=1)) + int(alto*0.25)
     
     zona_media_x = thresh[:, int(ancho*0.25):int(ancho*0.75)]
-    cx = np.argmax(np.sum(zona_media_x, axis=0)) + int(ancho*0.25) # Columna con más tinta (Eje Y)
+    cx = np.argmax(np.sum(zona_media_x, axis=0)) + int(ancho*0.25)
     
-    # Dibujar cruz AZUL para demostrar que encontramos el centro real
-    cv2.line(img_debug, (0, cy), (ancho, cy), (255, 0, 0), 1)
-    cv2.line(img_debug, (cx, 0), (cx, alto), (255, 0, 0), 1)
-
-    # --- B. DETECCIÓN DE SÍMBOLOS CON BORRADOR MÁGICO ASIMÉTRICO DE EJE ---
-    
-    # Encontramos las líneas rectas puras de la grilla
-    k_len = max(20, int(ancho * 0.1)) # Kernel largo para líneas
+    k_len = max(20, int(ancho * 0.1))
     kernel_h_clean = cv2.getStructuringElement(cv2.MORPH_RECT, (k_len, 1))
-    kernel_v_clean = cv2.getStructuringElement(cv2.MORPH_RECT, (1, k_len))
-    lineas_h = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel_h_clean)
-    lineas_v = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel_v_clean)
+    lineas_h_puras = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel_h_clean)
     
-    # MEJORA: Engrosamiento asimétrico dirigido para "barrer" los ticks de la regla
-    # Usamos un "borrador" vertical para la línea horizontal
-    grilla_h_ancha = cv2.dilate(lineas_h, np.ones((int(alto*0.015), 1), np.uint8)) 
-    # Usamos un "borrador" horizontal para la línea vertical
-    grilla_v_ancha = cv2.dilate(lineas_v, np.ones((1, int(ancho*0.015)), np.uint8)) 
+    k_len_v = max(20, int(alto * 0.1))
+    kernel_v_clean = cv2.getStructuringElement(cv2.MORPH_RECT, (1, k_len_v))
+    lineas_v_puras = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel_v_clean)
     
-    # Combinamos para obtener la grilla engrosada (Borrador completo anti-regla)
-    grilla_engrosada = cv2.add(grilla_h_ancha, grilla_v_ancha)
+    eje_derecho = lineas_h_puras[cy-5:cy+5, cx:]
+    _, x_h = np.where(eje_derecho > 0)
+    dist_60 = np.max(x_h) if len(x_h) > 0 else (ancho - cx)*0.75
     
-    # Restamos físicamente las líneas y los ticks de la imagen binarizada
-    campo_limpio = cv2.subtract(thresh, grilla_engrosada)
+    borrador_h_ticks = cv2.dilate(lineas_h_puras, np.ones((int(alto*0.015), 1), np.uint8))
+    borrador_v_ticks = cv2.dilate(lineas_v_puras, np.ones((1, int(ancho*0.015)), np.uint8))
+    borrador_anti_regla = cv2.add(borrador_h_ticks, borrador_v_ticks)
     
-    # Pequeña dilatación para unir símbolos que hayan sido cortados por la resta
+    return (cx, cy), borrador_anti_regla, dist_60
+
+
+def classify_symbol(roi_bin):
+    h, w = roi_bin.shape
+    if cv2.countNonZero(roi_bin) < 5:
+        return 'ignorar'
+    
+    k_size = max(2, int(min(w, h) * 0.40))
+    kernel_erosion = np.ones((k_size, k_size), np.uint8)
+    eroded_roi = cv2.erode(roi_bin, kernel_erosion, iterations=1)
+    
+    nucleo_area = cv2.countNonZero(eroded_roi)
+    if nucleo_area / (float(h*w)) > 0.05: 
+        return 'fallado' 
+    else:
+        return 'visto'   
+
+
+def detect_and_classify_symbols(img_bin, borrador_anti_regla, centro, pixels_por_10_grados):
+    alto, ancho = img_bin.shape
+    img_auditoria = np.zeros((alto, ancho, 3), dtype=np.uint8) 
+    img_auditoria[:,:] = [255, 255, 255] 
+    
+    campo_limpio = cv2.subtract(img_bin, borrador_anti_regla)
     simbolos_unidos = cv2.dilate(campo_limpio, np.ones((2,2), np.uint8))
     
-    # Encontrar contornos
-    contornos, _ = cv2.findContours(simbolos_unidos, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    cuadrados_count = 0
+    circulos_count = 0
+    num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(simbolos_unidos, connectivity=8)
     
-    # Filtros de tamaño dinámicos basados en la resolución de la imagen
     area_min = (ancho * 0.002) ** 2
     area_max = (ancho * 0.02) ** 2
+    cx, cy = centro
     
-    cuadrados_encontrados = 0
-    circulos_encontrados = 0
-    
-    for cnt in contornos:
-        x, y, w, h = cv2.boundingRect(cnt)
-        area = w * h
-        aspect_ratio = w / float(h)
+    for i in range(1, num_labels): 
+        x, y, w, h = stats[i, cv2.CC_STAT_LEFT], stats[i, cv2.CC_STAT_TOP], \
+                     stats[i, cv2.CC_STAT_WIDTH], stats[i, cv2.CC_STAT_HEIGHT]
+        area = stats[i, cv2.CC_STAT_AREA]
         
-        # Filtro de forma: si es demasiado alargado, no es un símbolo
-        if area_min < area < area_max and 0.4 < aspect_ratio < 2.5:
-            # ROI en la imagen LIMPIA binarizada (sin líneas ni ticks)
-            roi = campo_limpio[y:y+h, x:x+w]
+        if area_min < area < area_max and 0.4 < (w/float(h)) < 2.5:
+            px, py = x + w/2.0, y + h/2.0
+            dx, dy = px - cx, py - cy
             
-            # Clasificación por Erosión Destructiva
-            # Creamos una "lija" cuyo tamaño depende de la caja misma (40% de su tamaño)
-            k_size = max(2, int(min(w, h) * 0.40))
-            kernel_erosion = np.ones((k_size, k_size), np.uint8)
+            distancia_grados = (math.hypot(dx, dy) / pixels_por_10_grados) * 10.0
             
-            # Aplicamos la lija: Si es línea fina desaparece. Si es bloque sobrevive.
-            eroded_roi = cv2.erode(roi, kernel_erosion, iterations=1)
-            
-            if cv2.countNonZero(eroded_roi) > 0:
-                cuadrados_encontrados += 1
-                cv2.rectangle(img_debug, (x, y), (x+w, y+h), (0, 0, 255), 2) # Caja Roja
-            else:
-                circulos_encontrados += 1
-                cv2.rectangle(img_debug, (x, y), (x+w, y+h), (0, 255, 0), 1) # Caja Verde
+            # FILTRO LEGAL: Exclusivamente <= 40 grados (con 1 grado de tolerancia de impresión)
+            if distancia_grados <= 41.0:
+                roi = campo_limpio[y:y+h, x:x+w]
+                tipo = classify_symbol(roi)
+                
+                if tipo == 'fallado':
+                    cuadrados_count += 1
+                    cv2.rectangle(img_auditoria, (x, y), (x+w, y+h), (0, 0, 255), 2)
+                elif tipo == 'visto':
+                    circulos_count += 1
+                    cv2.rectangle(img_auditoria, (x, y), (x+w, y+h), (0, 255, 0), 1)
 
-    return img_debug, cuadrados_encontrados, circulos_encontrados
+    return img_auditoria, cuadrados_count, circulos_count
 
-# --- INTERFAZ ---
-archivo = st.file_uploader("Sube el CVC para probar el Borrador Asimétrico Mágico", type=["jpg", "jpeg", "png"])
+# ==========================================
+# INTERFAZ WEB (`app.py`)
+# ==========================================
+
+archivo = st.file_uploader("Sube un estudio de CVC para calcular la incapacidad", type=["jpg", "jpeg", "png"])
 
 if archivo is not None:
-    with st.spinner("Escaneando con el nuevo motor PRO anti-ticks..."):
-        img_res, total_cuadrados, total_circulos = detectar_simbolos(archivo.getvalue())
+    with st.spinner("Procesando área legal de 40 grados..."):
         
-        col1, col2 = st.columns([3, 1])
+        nparr = np.frombuffer(archivo.getvalue(), np.uint8)
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        _, thresh = cv2.threshold(gray, 180, 255, cv2.THRESH_BINARY_INV)
+        alto, ancho = thresh.shape
+
+        centro, borrador_anti_regla, dist_60 = find_and_clean_axes(thresh)
+        pixels_por_10_grados = float(dist_60 / 6.0)
+        
+        img_auditoria_bin, t_cuad, t_circ = detect_and_classify_symbols(thresh, borrador_anti_regla, centro, pixels_por_10_grados)
+        
+        img_final = img.copy()
+        for i in range(3):
+            mask = img_auditoria_bin[:,:,i] != 255
+            img_final[mask, i] = img_auditoria_bin[mask, i]
+            
+        cv2.line(img_final, (0, centro[1]), (ancho, centro[1]), (255, 0, 0), 1)
+        cv2.line(img_final, (centro[0], 0), (centro[0], alto), (255, 0, 0), 1)
+        
+        radio_40_px = int(4.0 * pixels_por_10_grados)
+        cv2.circle(img_final, centro, radio_40_px, (0, 165, 255), 3)
+
+        # ------------------------------------------
+        # MOTOR MATEMÁTICO PERICIAL
+        # ------------------------------------------
+        # 1. Total de puntos evaluados en el área legal
+        total_puntos_area = t_cuad + t_circ
+        
+        # 2. Proporción de daño 
+        base_calculo = 104.0 
+        
+        # 3. Cálculo de Grados
+        grados_no_vistos = (t_cuad / base_calculo) * 320.0
+        
+        # 4. Cálculo de Incapacidad Final
+        incapacidad_porcentaje = (grados_no_vistos / 320.0) * 100 * 0.25
+
+        # ------------------------------------------
+        # MOSTRAR RESULTADOS
+        # ------------------------------------------
+        col1, col2 = st.columns([3, 2])
         with col1:
-            img_rgb = cv2.cvtColor(img_res, cv2.COLOR_BGR2RGB)
-            st.image(Image.fromarray(img_rgb), caption="Auditoría Visual (Ejes Ignorados)", use_container_width=True)
+            img_rgb = cv2.cvtColor(img_final, cv2.COLOR_BGR2RGB)
+            st.image(Image.fromarray(img_rgb), caption="Auditoría Visual (Anillo Naranja = 40°)", use_container_width=True)
         with col2:
-            st.metric("Cuadrados (Rojos)", total_cuadrados)
-            st.metric("Círculos (Verdes)", total_circulos)
-            st.write("---")
-            st.write("**Modo de Auditoría:**")
-            st.write("1. Cruz azul en el centro exacto.")
-            st.write("2. Cuadrados encerrados en ROJO.")
-            st.write("3. Círculos encerrados en VERDE.")
-            st.write("4. **Las marcas de la regla impresa (ticks) deberían estar completamente ignoradas.**")
+            st.markdown("### 📊 Informe Matemático")
+            
+            st.markdown("**Conteo de Estímulos (≤ 40°):**")
+            c1, c2 = st.columns(2)
+            c1.metric("Cuadrados (Fallados)", t_cuad)
+            c2.metric("Círculos (Vistos)", t_circ)
+            
+            st.divider()
+            
+            st.markdown("**Cálculo Legal:**")
+            st.metric("Grados No Vistos", f"{grados_no_vistos:.1f}°", f"De un máximo de 320°")
+            st.metric("Incapacidad Unilateral", f"{incapacidad_porcentaje:.2f}%", "Basado en baremo 0.25%")
+            
+            st.info(f"**Nota de Auditoría:** El cálculo se realizó estrictamente
