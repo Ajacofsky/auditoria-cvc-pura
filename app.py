@@ -20,27 +20,28 @@ st.markdown("""
 """)
 
 # ==========================================
-# 🔒 MOTOR DE LECTURA (NUEVO)
+# 🔒 MOTOR DE LECTURA MEJORADO (OCR)
 # ==========================================
 def extraer_nombre(img_gray):
-    """Escanea el 25% superior de la hoja para extraer el nombre del paciente."""
+    """Escanea el encabezado intentando salvar el formato de matriz de puntos."""
     try:
         alto, ancho = img_gray.shape
-        header_img = img_gray[0:int(alto*0.25), :]
-        # Mejorar el contraste para que la computadora lea mejor las letras
-        _, thresh_ocr = cv2.threshold(header_img, 150, 255, cv2.THRESH_BINARY)
+        # Aislar solo el 20% superior para no confundir al lector con otros textos
+        header_img = img_gray[0:int(alto*0.20), :]
         
-        texto = pytesseract.image_to_string(thresh_ocr)
+        # Binarización automática de Otsu (mucho más potente para fondos variables)
+        _, thresh_ocr = cv2.threshold(header_img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         
-        # Buscar la palabra NOMBRE y capturar las palabras siguientes
-        match = re.search(r'NOMBRE\s+([A-Z\s]+)', texto, re.IGNORECASE)
+        # psm 6 asume un solo bloque de texto uniforme, ideal para este tipo de encabezados tabulados
+        texto = pytesseract.image_to_string(thresh_ocr, config='--psm 6')
+        
+        # Busca la palabra NOMBRE (con o sin dos puntos) y captura las letras mayúsculas siguientes
+        match = re.search(r'NOMBRE[\s:.]+([A-Z]{2,}(?:\s+[A-Z]{2,})*)', texto, re.IGNORECASE)
         if match:
-            # Limpiar espacios en blanco excesivos
-            nombre_limpio = re.sub(r'\s+', ' ', match.group(1)).strip()
-            return nombre_limpio
+            return match.group(1).strip()
         return ""
     except Exception as e:
-        return "" # Si falla el motor de lectura, no detiene la app
+        return "" # Silencioso en caso de error
 
 # ==========================================
 # 🔒 MOTOR DE VISIÓN BLINDADO 
@@ -133,21 +134,21 @@ def generar_pdf_moderno(nombre_paciente, incap_od, grados_od, incap_oi, grados_o
     pdf = FPDF()
     pdf.add_page()
     
-    # 1. Encabezado Moderno (Fondo Azul Marino)
-    pdf.set_fill_color(41, 64, 115) # Azul oscuro profesional
+    pdf.set_fill_color(41, 64, 115) 
     pdf.set_text_color(255, 255, 255)
     pdf.set_font("Arial", 'B', 15)
     pdf.cell(0, 16, "  DICTAMEN PERICIAL - CAMPO VISUAL COMPUTARIZADO", 0, 1, 'L', fill=True)
     pdf.ln(5)
     
-    # 2. Bloque de Datos del Paciente (Gris claro)
     pdf.set_fill_color(240, 240, 240)
     pdf.set_text_color(0, 0, 0)
     
     pdf.set_font("Arial", 'B', 11)
     pdf.cell(30, 10, " Paciente:", 0, 0, 'L', fill=True)
     pdf.set_font("Arial", '', 11)
-    pdf.cell(90, 10, f" {nombre_paciente.upper()}", 0, 0, 'L', fill=True)
+    
+    nombre_mostrar = nombre_paciente.upper() if nombre_paciente.strip() else "NO ESPECIFICADO"
+    pdf.cell(90, 10, f" {nombre_mostrar}", 0, 0, 'L', fill=True)
     
     pdf.set_font("Arial", 'B', 11)
     pdf.cell(20, 10, " Fecha:", 0, 0, 'L', fill=True)
@@ -159,13 +160,12 @@ def generar_pdf_moderno(nombre_paciente, incap_od, grados_od, incap_oi, grados_o
     pdf.line(10, pdf.get_y(), 200, pdf.get_y())
     pdf.ln(10)
     
-    # 3. Resultados Oculares
     pdf.set_font("Arial", 'B', 14)
     pdf.cell(0, 10, "RESULTADOS DE LA EVALUACIÓN (ÁREA 40 GRADOS)", 0, 1, 'L')
     pdf.ln(2)
     
     if incap_od > 0:
-        pdf.set_fill_color(235, 245, 255) # Celeste muy claro
+        pdf.set_fill_color(235, 245, 255) 
         pdf.set_font("Arial", 'B', 12)
         pdf.cell(0, 10, " OJO DERECHO (OD)", 0, 1, 'L', fill=True)
         pdf.set_font("Arial", '', 11)
@@ -182,11 +182,10 @@ def generar_pdf_moderno(nombre_paciente, incap_od, grados_od, incap_oi, grados_o
         pdf.cell(0, 8, f"   - Incapacidad Unilateral:    {incap_oi:.2f}%", 0, 1)
         pdf.ln(4)
         
-    # 4. Bloque de Incapacidad Total
     pdf.ln(10)
     pdf.set_font("Arial", 'B', 14)
     if modo == "Bilateral (OD y OI)":
-        pdf.set_fill_color(46, 134, 193) # Azul más vivo
+        pdf.set_fill_color(46, 134, 193) 
         pdf.set_text_color(255, 255, 255)
         pdf.cell(0, 14, f" INCAPACIDAD TOTAL BILATERAL: {incap_total:.2f}%", 0, 1, 'C', fill=True)
     else:
@@ -195,7 +194,6 @@ def generar_pdf_moderno(nombre_paciente, incap_od, grados_od, incap_oi, grados_o
         val = incap_od if incap_od > 0 else incap_oi
         pdf.cell(0, 14, f" INCAPACIDAD UNILATERAL DEFINITIVA: {val:.2f}%", 0, 1, 'C', fill=True)
         
-    # 5. Firma
     pdf.set_text_color(0, 0, 0)
     pdf.ln(45)
     pdf.set_draw_color(0, 0, 0)
@@ -210,7 +208,6 @@ def generar_pdf_moderno(nombre_paciente, incap_od, grados_od, incap_oi, grados_o
 # INTERFAZ WEB (`app.py`)
 # ==========================================
 
-# Guardar el nombre en la memoria temporal
 if "nombre_paciente" not in st.session_state:
     st.session_state.nombre_paciente = ""
 
@@ -229,7 +226,7 @@ def procesar_panel_ojo(titulo_ojo, key_suffix):
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             _, thresh = cv2.threshold(gray, 180, 255, cv2.THRESH_BINARY_INV)
             
-            # Auto-extracción del nombre solo en el primer estudio que se suba
+            # Auto-extracción del nombre
             if st.session_state.nombre_paciente == "":
                 nombre_detectado = extraer_nombre(gray)
                 if nombre_detectado:
@@ -281,7 +278,6 @@ st.divider()
 # ==========================================
 st.header("📋 Dictamen Legal y Exportación")
 
-# Campo Editable para el nombre del paciente
 nombre_final = st.text_input("Paciente (Extraído automáticamente o ingréselo manual):", value=st.session_state.nombre_paciente)
 
 incap_total_bilateral = 0.0
@@ -300,12 +296,17 @@ else:
         st.metric("INCAPACIDAD UNILATERAL", f"{incap_od:.2f}%")
 
 if incap_od > 0 or incap_oi > 0:
-    # Botón PDF
+    
+    # Preparar el nombre seguro para el archivo (reemplaza espacios por guiones bajos)
+    nombre_archivo = "Paciente"
+    if nombre_final.strip():
+        nombre_archivo = nombre_final.strip().replace(" ", "_")
+        
     b64_pdf = generar_pdf_moderno(nombre_final, incap_od, grados_od, incap_oi, grados_oi, incap_total_bilateral, modo_evaluacion)
     
-    # Diseño de botón grande azul
+    # El archivo ahora se descargará como Dictamen_Pericial_NOMBREDELPACIENTE.pdf
     html_btn = f'''
-    <a href="data:application/pdf;base64,{b64_pdf}" download="Dictamen_{nombre_final.replace(" ", "_")}.pdf" style="display: block; padding: 15px; background-color: #2980b9; color: white; text-align: center; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 18px; margin-top: 20px;">
+    <a href="data:application/pdf;base64,{b64_pdf}" download="Dictamen_Pericial_{nombre_archivo}.pdf" style="display: block; padding: 15px; background-color: #2980b9; color: white; text-align: center; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 18px; margin-top: 20px;">
         📥 DESCARGAR INFORME PERICIAL PDF
     </a>
     '''
