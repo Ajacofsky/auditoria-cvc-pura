@@ -41,8 +41,11 @@ def find_and_clean_axes(thresh):
     _, x_h = np.where(eje_derecho > 0)
     dist_60 = np.max(x_h) if len(x_h) > 0 else (ancho - cx)*0.75
     
-    borrador_h_ticks = cv2.dilate(lineas_h_puras, np.ones((int(alto*0.015), 1), np.uint8))
-    borrador_v_ticks = cv2.dilate(lineas_v_puras, np.ones((1, int(ancho*0.015)), np.uint8))
+    # CIRUGÍA SEGURA 1: El Bisturí (Borrador mucho más fino para no comerse los círculos)
+    grosor_fino_h = max(3, int(alto*0.004))
+    grosor_fino_v = max(3, int(ancho*0.004))
+    borrador_h_ticks = cv2.dilate(lineas_h_puras, np.ones((grosor_fino_h, 1), np.uint8))
+    borrador_v_ticks = cv2.dilate(lineas_v_puras, np.ones((1, grosor_fino_v), np.uint8))
     borrador_anti_regla = cv2.add(borrador_h_ticks, borrador_v_ticks)
     
     return (cx, cy), borrador_anti_regla, dist_60
@@ -70,7 +73,10 @@ def detect_and_classify_symbols(img_bin, borrador_anti_regla, centro, pixels_por
     img_auditoria[:,:] = [255, 255, 255] 
     
     campo_limpio = cv2.subtract(img_bin, borrador_anti_regla)
-    simbolos_unidos = cv2.dilate(campo_limpio, np.ones((2,2), np.uint8))
+    
+    # CIRUGÍA SEGURA 2: El Pegamento (Unir las mitades de los círculos cortados por el bisturí)
+    grosor_pegamento = max(3, int(alto*0.004)) + 2
+    simbolos_unidos = cv2.dilate(campo_limpio, np.ones((grosor_pegamento, grosor_pegamento), np.uint8))
     
     cuadrados_count = 0
     circulos_count = 0
@@ -91,7 +97,6 @@ def detect_and_classify_symbols(img_bin, borrador_anti_regla, centro, pixels_por
             
             distancia_grados = (math.hypot(dx, dy) / pixels_por_10_grados) * 10.0
             
-            # FILTRO LEGAL: Exclusivamente <= 40 grados (con 1 grado de tolerancia de impresión)
             if distancia_grados <= 41.0:
                 roi = campo_limpio[y:y+h, x:x+w]
                 tipo = classify_symbol(roi)
@@ -134,42 +139,4 @@ if archivo is not None:
         cv2.line(img_final, (centro[0], 0), (centro[0], alto), (255, 0, 0), 1)
         
         radio_40_px = int(4.0 * pixels_por_10_grados)
-        cv2.circle(img_final, centro, radio_40_px, (0, 165, 255), 3)
-
-        # ------------------------------------------
-        # MOTOR MATEMÁTICO PERICIAL
-        # ------------------------------------------
-        # 1. Total de puntos evaluados en el área legal
-        total_puntos_area = t_cuad + t_circ
-        
-        # 2. Proporción de daño 
-        base_calculo = 104.0 
-        
-        # 3. Cálculo de Grados
-        grados_no_vistos = (t_cuad / base_calculo) * 320.0
-        
-        # 4. Cálculo de Incapacidad Final
-        incapacidad_porcentaje = (grados_no_vistos / 320.0) * 100 * 0.25
-
-        # ------------------------------------------
-        # MOSTRAR RESULTADOS
-        # ------------------------------------------
-        col1, col2 = st.columns([3, 2])
-        with col1:
-            img_rgb = cv2.cvtColor(img_final, cv2.COLOR_BGR2RGB)
-            st.image(Image.fromarray(img_rgb), caption="Auditoría Visual (Anillo Naranja = 40°)", use_container_width=True)
-        with col2:
-            st.markdown("### 📊 Informe Matemático")
-            
-            st.markdown("**Conteo de Estímulos (≤ 40°):**")
-            c1, c2 = st.columns(2)
-            c1.metric("Cuadrados (Fallados)", t_cuad)
-            c2.metric("Círculos (Vistos)", t_circ)
-            
-            st.divider()
-            
-            st.markdown("**Cálculo Legal:**")
-            st.metric("Grados No Vistos", f"{grados_no_vistos:.1f}°", f"De un máximo de 320°")
-            st.metric("Incapacidad Unilateral", f"{incapacidad_porcentaje:.2f}%", "Basado en baremo 0.25%")
-            
-            st.info(f"**Nota de Auditoría:** El cálculo se realizó estrictamente sobre los puntos contenidos dentro de los 40 grados centrales, utilizando una base proporcional de 104 estímulos.")
+        cv2.circle(img_final, centro, radio_40_px, (0, 16
