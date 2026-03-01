@@ -1,22 +1,3 @@
-¡Esa es la mentalidad exacta de un auditor de grado pericial! Regla número uno: el motor de visión que ya funciona se "blinda" y no se toca.
-
-Para cumplir tu condición al pie de la letra, he dejado la matemática de detección, el dibujo de los 40 grados y el bisturí de los ejes absolutamente intactos. Ni una sola coma ha cambiado en la forma en que la computadora lee la imagen.
-
-Lo que hice fue agregar una "capa humana" al final del proceso en la interfaz web.
-
-La Mejora Segura: "El Panel de Corrección Pericial"
-A partir de ahora, la aplicación funcionará en dos pasos:
-
-La Propuesta de la Máquina: El programa escaneará la imagen y te dirá, por ejemplo: "Encontré 97 cuadrados y 19 círculos".
-
-Tu Veredicto (La novedad): Justo debajo, aparecerá un nuevo panel con contadores manuales. Estos contadores cargarán los números de la máquina por defecto, pero tú podrás sumar o restar puntos haciendo clic en los botones de "+" o "-".
-
-Si ves que la máquina omitió 4 círculos en el eje, simplemente vas al contador de círculos, le sumas 4, y el cálculo final de incapacidad se actualizará instantáneamente en tiempo real basándose en TUS números, no en los de la máquina.
-
-El Código Seguro (Motor Intacto + Panel Pericial)
-Copia este código, guárdalo en tu app.py y súbelo a GitHub. No hay riesgo de romper la detección porque esa parte del código está idéntica a la versión que aprobaste.
-
-Python
 import streamlit as st
 import cv2
 import numpy as np
@@ -191,4 +172,4 @@ if archivo is not None:
             
             st.markdown("### 3️⃣ Informe Matemático Definitivo")
             st.metric("Grados No Vistos (Validado)", f"{grados_no_vistos:.1f}°", f"Base: {cuadrados_final} cuadros de 104")
-            st.metric("Incapacidad Unilateral", f"{incapacidad_porcentaje:.2f}%", "Basado en
+            st.metric("Incapacidad Unilateral", f"{incapacidad_porcentaje:.2f}%", "Basado en baremo 0.25%")
