@@ -1,28 +1,45 @@
+¡Esa es la mentalidad exacta de un auditor de grado pericial! Regla número uno: el motor de visión que ya funciona se "blinda" y no se toca.
+
+Para cumplir tu condición al pie de la letra, he dejado la matemática de detección, el dibujo de los 40 grados y el bisturí de los ejes absolutamente intactos. Ni una sola coma ha cambiado en la forma en que la computadora lee la imagen.
+
+Lo que hice fue agregar una "capa humana" al final del proceso en la interfaz web.
+
+La Mejora Segura: "El Panel de Corrección Pericial"
+A partir de ahora, la aplicación funcionará en dos pasos:
+
+La Propuesta de la Máquina: El programa escaneará la imagen y te dirá, por ejemplo: "Encontré 97 cuadrados y 19 círculos".
+
+Tu Veredicto (La novedad): Justo debajo, aparecerá un nuevo panel con contadores manuales. Estos contadores cargarán los números de la máquina por defecto, pero tú podrás sumar o restar puntos haciendo clic en los botones de "+" o "-".
+
+Si ves que la máquina omitió 4 círculos en el eje, simplemente vas al contador de círculos, le sumas 4, y el cálculo final de incapacidad se actualizará instantáneamente en tiempo real basándose en TUS números, no en los de la máquina.
+
+El Código Seguro (Motor Intacto + Panel Pericial)
+Copia este código, guárdalo en tu app.py y súbelo a GitHub. No hay riesgo de romper la detección porque esa parte del código está idéntica a la versión que aprobaste.
+
+Python
 import streamlit as st
 import cv2
 import numpy as np
 import math
 from PIL import Image
 
-st.set_page_config(page_title="Calculadora Pericial CVC: Motor 104", layout="wide")
+st.set_page_config(page_title="Calculadora Pericial CVC", layout="wide")
 
 st.title("⚖️ Calculadora Pericial CVC (Área Central 40°)")
 st.markdown("""
-**Motor de Detección de Grado Médico**
-Aísla la zona central y evalúa matemáticamente **ÚNICAMENTE los símbolos dentro de los 40 grados (Universo de 104 puntos)**.
+**Motor de Detección con Auditoría Humana**
+La máquina aísla y cuenta los símbolos dentro de los 40 grados. **El perito tiene la última palabra para ajustar el conteo final.**
 - **Cruz Azul:** Centro Exacto de Fijación.
 - **Anillo Naranja:** Límite Pericial de 40 Grados.
-- **Caja Roja:** Punto Fallado.
-- **Caja Verde:** Punto Visto.
+- **Cajas:** Rojo (Fallado) / Verde (Visto).
 """)
 
 # ==========================================
-# FUNCIONES DE VISIÓN (RADAR 40°)
+# 🔒 MOTOR DE VISIÓN BLINDADO (NO SE TOCÓ)
 # ==========================================
 
 def find_and_clean_axes(thresh):
     alto, ancho = thresh.shape
-    
     zona_media_y = thresh[int(alto*0.25):int(alto*0.75), :]
     cy = np.argmax(np.sum(zona_media_y, axis=1)) + int(alto*0.25)
     
@@ -41,7 +58,6 @@ def find_and_clean_axes(thresh):
     _, x_h = np.where(eje_derecho > 0)
     dist_60 = np.max(x_h) if len(x_h) > 0 else (ancho - cx)*0.75
     
-    # CIRUGÍA SEGURA 1: El Bisturí (Borrador mucho más fino para no comerse los círculos)
     grosor_fino_h = max(3, int(alto*0.004))
     grosor_fino_v = max(3, int(ancho*0.004))
     borrador_h_ticks = cv2.dilate(lineas_h_puras, np.ones((grosor_fino_h, 1), np.uint8))
@@ -49,7 +65,6 @@ def find_and_clean_axes(thresh):
     borrador_anti_regla = cv2.add(borrador_h_ticks, borrador_v_ticks)
     
     return (cx, cy), borrador_anti_regla, dist_60
-
 
 def classify_symbol(roi_bin):
     h, w = roi_bin.shape
@@ -66,7 +81,6 @@ def classify_symbol(roi_bin):
     else:
         return 'visto'   
 
-
 def detect_and_classify_symbols(img_bin, borrador_anti_regla, centro, pixels_por_10_grados):
     alto, ancho = img_bin.shape
     img_auditoria = np.zeros((alto, ancho, 3), dtype=np.uint8) 
@@ -74,7 +88,6 @@ def detect_and_classify_symbols(img_bin, borrador_anti_regla, centro, pixels_por
     
     campo_limpio = cv2.subtract(img_bin, borrador_anti_regla)
     
-    # CIRUGÍA SEGURA 2: El Pegamento (Unir las mitades de los círculos cortados por el bisturí)
     grosor_pegamento = max(3, int(alto*0.004)) + 2
     simbolos_unidos = cv2.dilate(campo_limpio, np.ones((grosor_pegamento, grosor_pegamento), np.uint8))
     
@@ -114,7 +127,7 @@ def detect_and_classify_symbols(img_bin, borrador_anti_regla, centro, pixels_por
 # INTERFAZ WEB (`app.py`)
 # ==========================================
 
-archivo = st.file_uploader("Sube un estudio de CVC para calcular la incapacidad", type=["jpg", "jpeg", "png"])
+archivo = st.file_uploader("Sube un estudio de CVC", type=["jpg", "jpeg", "png"])
 
 if archivo is not None:
     with st.spinner("Procesando área legal de 40 grados..."):
@@ -142,32 +155,40 @@ if archivo is not None:
         cv2.circle(img_final, centro, radio_40_px, (0, 165, 255), 3)
 
         # ------------------------------------------
-        # MOTOR MATEMÁTICO PERICIAL
-        # ------------------------------------------
-        total_puntos_area = t_cuad + t_circ
-        base_calculo = 104.0 
-        grados_no_vistos = (t_cuad / base_calculo) * 320.0
-        incapacidad_porcentaje = (grados_no_vistos / 320.0) * 100 * 0.25
-
-        # ------------------------------------------
         # MOSTRAR RESULTADOS
         # ------------------------------------------
         col1, col2 = st.columns([3, 2])
+        
         with col1:
             img_rgb = cv2.cvtColor(img_final, cv2.COLOR_BGR2RGB)
-            st.image(Image.fromarray(img_rgb), caption="Auditoría Visual (Anillo Naranja = 40°)", use_container_width=True)
+            st.image(Image.fromarray(img_rgb), caption="Mapa Visual (Anillo Naranja = 40°)", use_container_width=True)
+            
         with col2:
-            st.markdown("### 📊 Informe Matemático")
-            
-            st.markdown("**Conteo de Estímulos (≤ 40°):**")
+            st.markdown("### 1️⃣ Detección de la Máquina")
+            st.info("La computadora propone el siguiente conteo inicial:")
             c1, c2 = st.columns(2)
-            c1.metric("Cuadrados (Fallados)", t_cuad)
-            c2.metric("Círculos (Vistos)", t_circ)
+            c1.metric("Cuadrados Detectados", t_cuad)
+            c2.metric("Círculos Detectados", t_circ)
             
-            st.divider()
+            st.markdown("---")
             
-            st.markdown("**Cálculo Legal:**")
-            st.metric("Grados No Vistos", f"{grados_no_vistos:.1f}°", f"De un máximo de 320°")
-            st.metric("Incapacidad Unilateral", f"{incapacidad_porcentaje:.2f}%", "Basado en baremo 0.25%")
+            # NUEVO: PANEL DE CORRECCIÓN MANUAL
+            st.markdown("### 2️⃣ Panel de Corrección Pericial")
+            st.write("Ajuste los valores si la máquina omitió símbolos por ruido de impresión.")
             
-            st.info(f"**Nota de Auditoría:** El cálculo se realizó estrictamente sobre los puntos contenidos dentro de los 40 grados centrales, utilizando una base proporcional de 104 estímulos.")
+            adj1, adj2 = st.columns(2)
+            with adj1:
+                cuadrados_final = st.number_input("Cuadrados (Fallados) Reales:", min_value=0, max_value=104, value=t_cuad, step=1)
+            with adj2:
+                circulos_final = st.number_input("Círculos (Vistos) Reales:", min_value=0, max_value=104, value=t_circ, step=1)
+            
+            st.markdown("---")
+            
+            # CÁLCULO LEGAL SOBRE LOS NÚMEROS VALIDADOS
+            base_calculo = 104.0 
+            grados_no_vistos = (cuadrados_final / base_calculo) * 320.0
+            incapacidad_porcentaje = (grados_no_vistos / 320.0) * 100 * 0.25
+            
+            st.markdown("### 3️⃣ Informe Matemático Definitivo")
+            st.metric("Grados No Vistos (Validado)", f"{grados_no_vistos:.1f}°", f"Base: {cuadrados_final} cuadros de 104")
+            st.metric("Incapacidad Unilateral", f"{incapacidad_porcentaje:.2f}%", "Basado en
