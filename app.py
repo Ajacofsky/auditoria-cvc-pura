@@ -3,20 +3,21 @@ import cv2
 import numpy as np
 import math
 from PIL import Image
+from fpdf import FPDF
+import base64
 
 st.set_page_config(page_title="Calculadora Pericial CVC", layout="wide")
 
 st.title("⚖️ Calculadora Pericial CVC (Área Central 40°)")
 st.markdown("""
-**Motor de Detección con Auditoría Humana**
-La máquina aísla y cuenta los símbolos dentro de los 40 grados. **El perito tiene la última palabra para ajustar el conteo final.**
-- **Cruz Azul:** Centro Exacto de Fijación.
-- **Anillo Naranja:** Límite Pericial de 40 Grados.
-- **Cajas:** Rojo (Fallado) / Verde (Visto).
+**Motor de Detección con Auditoría Humana y Reporte PDF**
+- Aísla la zona central (Universo de 104 puntos).
+- El perito tiene la última palabra sobre el conteo final.
+- Cálculo automático de bilateralidad y exportación legal.
 """)
 
 # ==========================================
-# 🔒 MOTOR DE VISIÓN BLINDADO (NO SE TOCÓ)
+# 🔒 MOTOR DE VISIÓN BLINDADO 
 # ==========================================
 
 def find_and_clean_axes(thresh):
@@ -56,8 +57,7 @@ def classify_symbol(roi_bin):
     kernel_erosion = np.ones((k_size, k_size), np.uint8)
     eroded_roi = cv2.erode(roi_bin, kernel_erosion, iterations=1)
     
-    nucleo_area = cv2.countNonZero(eroded_roi)
-    if nucleo_area / (float(h*w)) > 0.05: 
+    if cv2.countNonZero(eroded_roi) / (float(h*w)) > 0.05: 
         return 'fallado' 
     else:
         return 'visto'   
@@ -68,7 +68,6 @@ def detect_and_classify_symbols(img_bin, borrador_anti_regla, centro, pixels_por
     img_auditoria[:,:] = [255, 255, 255] 
     
     campo_limpio = cv2.subtract(img_bin, borrador_anti_regla)
-    
     grosor_pegamento = max(3, int(alto*0.004)) + 2
     simbolos_unidos = cv2.dilate(campo_limpio, np.ones((grosor_pegamento, grosor_pegamento), np.uint8))
     
@@ -88,7 +87,6 @@ def detect_and_classify_symbols(img_bin, borrador_anti_regla, centro, pixels_por
         if area_min < area < area_max and 0.4 < (w/float(h)) < 2.5:
             px, py = x + w/2.0, y + h/2.0
             dx, dy = px - cx, py - cy
-            
             distancia_grados = (math.hypot(dx, dy) / pixels_por_10_grados) * 10.0
             
             if distancia_grados <= 41.0:
@@ -105,71 +103,129 @@ def detect_and_classify_symbols(img_bin, borrador_anti_regla, centro, pixels_por
     return img_auditoria, cuadrados_count, circulos_count
 
 # ==========================================
+# GENERADOR DE PDF 
+# ==========================================
+
+def generar_pdf_base64(incap_od, incap_oi, incap_total, modo):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Arial", 'B', 16)
+    pdf.cell(0, 10, "DICTAMEN PERICIAL - CAMPO VISUAL COMPUTARIZADO", ln=True, align='C')
+    pdf.ln(10)
+    
+    pdf.set_font("Arial", '', 12)
+    pdf.cell(0, 10, "Metodologia: Analisis del area central (40 grados), base 104 estimulos.", ln=True)
+    pdf.ln(5)
+    
+    if modo == "Unilateral (1 Ojo)":
+        ojo_str = "Derecho (OD)" if incap_od > 0 else "Izquierdo (OI)"
+        incap_val = incap_od if incap_od > 0 else incap_oi
+        pdf.cell(0, 10, f"Ojo Evaluado: {ojo_str}", ln=True)
+        pdf.set_font("Arial", 'B', 14)
+        pdf.cell(0, 10, f"Incapacidad Unilateral Validada: {incap_val:.2f}%", ln=True)
+    else:
+        pdf.cell(0, 10, f"Incapacidad Unilateral Ojo Derecho (OD): {incap_od:.2f}%", ln=True)
+        pdf.cell(0, 10, f"Incapacidad Unilateral Ojo Izquierdo (OI): {incap_oi:.2f}%", ln=True)
+        pdf.ln(5)
+        pdf.cell(0, 10, f"Suma Aritmetica (OD + OI): {(incap_od + incap_oi):.2f}%", ln=True)
+        pdf.cell(0, 10, f"Factor de Bilateralidad Aplicado: x 1.5", ln=True)
+        pdf.ln(5)
+        pdf.set_font("Arial", 'B', 14)
+        pdf.cell(0, 10, f"INCAPACIDAD TOTAL BILATERAL: {incap_total:.2f}%", ln=True)
+        
+    pdf.ln(30)
+    pdf.set_font("Arial", '', 12)
+    pdf.cell(0, 10, "_____________________________________________________", ln=True, align='C')
+    pdf.cell(0, 10, "Firma y Sello del Perito Medico", ln=True, align='C')
+    
+    pdf_bytes = pdf.output(dest='S').encode('latin-1')
+    b64 = base64.b64encode(pdf_bytes).decode()
+    return b64
+
+# ==========================================
 # INTERFAZ WEB (`app.py`)
 # ==========================================
 
-archivo = st.file_uploader("Sube un estudio de CVC", type=["jpg", "jpeg", "png"])
+modo_evaluacion = st.radio("Seleccione el Tipo de Evaluación:", ["Unilateral (1 Ojo)", "Bilateral (OD y OI)"], horizontal=True)
+st.divider()
 
-if archivo is not None:
-    with st.spinner("Procesando área legal de 40 grados..."):
-        
-        nparr = np.frombuffer(archivo.getvalue(), np.uint8)
-        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        _, thresh = cv2.threshold(gray, 180, 255, cv2.THRESH_BINARY_INV)
-        alto, ancho = thresh.shape
+def procesar_panel_ojo(titulo_ojo, key_suffix):
+    archivo = st.file_uploader(f"Subir estudio - {titulo_ojo}", type=["jpg", "jpeg", "png"], key=f"file_{key_suffix}")
+    incapacidad_final = 0.0
+    
+    if archivo is not None:
+        with st.spinner(f"Escaneando {titulo_ojo}..."):
+            nparr = np.frombuffer(archivo.getvalue(), np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            _, thresh = cv2.threshold(gray, 180, 255, cv2.THRESH_BINARY_INV)
+            
+            centro, borrador_anti_regla, dist_60 = find_and_clean_axes(thresh)
+            pixels_por_10_grados = float(dist_60 / 6.0)
+            
+            img_auditoria_bin, t_cuad, t_circ = detect_and_classify_symbols(thresh, borrador_anti_regla, centro, pixels_por_10_grados)
+            
+            img_final = img.copy()
+            for i in range(3):
+                mask = img_auditoria_bin[:,:,i] != 255
+                img_final[mask, i] = img_auditoria_bin[mask, i]
+                
+            cv2.circle(img_final, centro, int(4.0 * pixels_por_10_grados), (0, 165, 255), 3)
 
-        centro, borrador_anti_regla, dist_60 = find_and_clean_axes(thresh)
-        pixels_por_10_grados = float(dist_60 / 6.0)
-        
-        img_auditoria_bin, t_cuad, t_circ = detect_and_classify_symbols(thresh, borrador_anti_regla, centro, pixels_por_10_grados)
-        
-        img_final = img.copy()
-        for i in range(3):
-            mask = img_auditoria_bin[:,:,i] != 255
-            img_final[mask, i] = img_auditoria_bin[mask, i]
+            # INTERFAZ DEL PANEL
+            st.image(Image.fromarray(cv2.cvtColor(img_final, cv2.COLOR_BGR2RGB)), caption=f"Auditoría {titulo_ojo}", use_container_width=True)
             
-        cv2.line(img_final, (0, centro[1]), (ancho, centro[1]), (255, 0, 0), 1)
-        cv2.line(img_final, (centro[0], 0), (centro[0], alto), (255, 0, 0), 1)
-        
-        radio_40_px = int(4.0 * pixels_por_10_grados)
-        cv2.circle(img_final, centro, radio_40_px, (0, 165, 255), 3)
+            st.markdown(f"**Corrección Pericial - {titulo_ojo}**")
+            col_a, col_b = st.columns(2)
+            with col_a:
+                cuadrados_final = st.number_input("Cuadrados Reales:", min_value=0, max_value=104, value=t_cuad, step=1, key=f"cuad_{key_suffix}")
+            with col_b:
+                circulos_final = st.number_input("Círculos Reales:", min_value=0, max_value=104, value=t_circ, step=1, key=f"circ_{key_suffix}")
+                
+            grados_no_vistos = (cuadrados_final / 104.0) * 320.0
+            incapacidad_final = (grados_no_vistos / 320.0) * 100 * 0.25
+            
+            st.metric(f"Incapacidad {titulo_ojo}", f"{incapacidad_final:.2f}%")
+            
+    return incapacidad_final
 
-        # ------------------------------------------
-        # MOSTRAR RESULTADOS
-        # ------------------------------------------
-        col1, col2 = st.columns([3, 2])
+# Layout de columnas
+if modo_evaluacion == "Unilateral (1 Ojo)":
+    incap_od = procesar_panel_ojo("Ojo Evaluado", "unico")
+    incap_oi = 0.0
+else:
+    col_izq, col_der = st.columns(2)
+    with col_izq:
+        incap_od = procesar_panel_ojo("Ojo Derecho (OD)", "od")
+    with col_der:
+        incap_oi = procesar_panel_ojo("Ojo Izquierdo (OI)", "oi")
+
+st.divider()
+
+# ==========================================
+# DICTAMEN FINAL Y PDF
+# ==========================================
+st.header("📋 Dictamen Legal Final")
+
+incap_total_bilateral = 0.0
+
+if modo_evaluacion == "Bilateral (OD y OI)":
+    if incap_od > 0 or incap_oi > 0:
+        suma_aritmetica = incap_od + incap_oi
+        incap_total_bilateral = suma_aritmetica * 1.5
         
-        with col1:
-            img_rgb = cv2.cvtColor(img_final, cv2.COLOR_BGR2RGB)
-            st.image(Image.fromarray(img_rgb), caption="Mapa Visual (Anillo Naranja = 40°)", use_container_width=True)
-            
-        with col2:
-            st.markdown("### 1️⃣ Detección de la Máquina")
-            st.info("La computadora propone el siguiente conteo inicial:")
-            c1, c2 = st.columns(2)
-            c1.metric("Cuadrados Detectados", t_cuad)
-            c2.metric("Círculos Detectados", t_circ)
-            
-            st.markdown("---")
-            
-            # NUEVO: PANEL DE CORRECCIÓN MANUAL
-            st.markdown("### 2️⃣ Panel de Corrección Pericial")
-            st.write("Ajuste los valores si la máquina omitió símbolos por ruido de impresión.")
-            
-            adj1, adj2 = st.columns(2)
-            with adj1:
-                cuadrados_final = st.number_input("Cuadrados (Fallados) Reales:", min_value=0, max_value=104, value=t_cuad, step=1)
-            with adj2:
-                circulos_final = st.number_input("Círculos (Vistos) Reales:", min_value=0, max_value=104, value=t_circ, step=1)
-            
-            st.markdown("---")
-            
-            # CÁLCULO LEGAL SOBRE LOS NÚMEROS VALIDADOS
-            base_calculo = 104.0 
-            grados_no_vistos = (cuadrados_final / base_calculo) * 320.0
-            incapacidad_porcentaje = (grados_no_vistos / 320.0) * 100 * 0.25
-            
-            st.markdown("### 3️⃣ Informe Matemático Definitivo")
-            st.metric("Grados No Vistos (Validado)", f"{grados_no_vistos:.1f}°", f"Base: {cuadrados_final} cuadros de 104")
-            st.metric("Incapacidad Unilateral", f"{incapacidad_porcentaje:.2f}%", "Basado en baremo 0.25%")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Suma Aritmética", f"{suma_aritmetica:.2f}%")
+        c2.metric("Factor Bilateralidad", "x 1.5")
+        c3.metric("INCAPACIDAD TOTAL", f"{incap_total_bilateral:.2f}%")
+    else:
+        st.info("Suba al menos una imagen para ver el cálculo final.")
+else:
+    if incap_od > 0:
+        st.metric("INCAPACIDAD UNILATERAL", f"{incap_od:.2f}%")
+
+# Botón de Descarga PDF
+if incap_od > 0 or incap_oi > 0:
+    b64_pdf = generar_pdf_base64(incap_od, incap_oi, incap_total_bilateral, modo_evaluacion)
+    href = f'<a href="data:application/pdf;base64,{b64_pdf}" download="Dictamen_Pericial_CVC.pdf" style="display: inline-block; padding: 10px 20px; background-color: #4CAF50; color: white; text-align: center; text-decoration: none; border-radius: 5px; font-weight: bold;">📥 Descargar Informe PDF</a>'
+    st.markdown(href, unsafe_allow_html=True)
