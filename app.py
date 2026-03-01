@@ -245,4 +245,68 @@ def procesar_panel_ojo(titulo_ojo, key_suffix):
                 mask = img_auditoria_bin[:,:,i] != 255
                 img_final[mask, i] = img_auditoria_bin[mask, i]
                 
-            cv2.circle(img_final, centro, int
+            cv2.circle(img_final, centro, int(4.0 * pixels_por_10_grados), (0, 165, 255), 3)
+
+            st.image(Image.fromarray(cv2.cvtColor(img_final, cv2.COLOR_BGR2RGB)), caption=f"Auditoría {titulo_ojo}", use_container_width=True)
+            
+            st.markdown(f"**Corrección Pericial**")
+            col_a, col_b = st.columns(2)
+            with col_a:
+                cuadrados_final = st.number_input("Cuadrados (Fallados):", min_value=0, max_value=104, value=t_cuad, step=1, key=f"cuad_{key_suffix}")
+            with col_b:
+                circulos_final = st.number_input("Círculos (Vistos):", min_value=0, max_value=104, value=t_circ, step=1, key=f"circ_{key_suffix}")
+                
+            grados_finales = (cuadrados_final / 104.0) * 320.0
+            incapacidad_final = (grados_finales / 320.0) * 100 * 0.25
+            
+            st.metric(f"Incapacidad {titulo_ojo}", f"{incapacidad_final:.2f}%")
+            
+    return incapacidad_final, grados_finales
+
+# Layout
+if modo_evaluacion == "Unilateral (1 Ojo)":
+    incap_od, grados_od = procesar_panel_ojo("Ojo Evaluado", "unico")
+    incap_oi, grados_oi = 0.0, 0.0
+else:
+    col_izq, col_der = st.columns(2)
+    with col_izq:
+        incap_od, grados_od = procesar_panel_ojo("Ojo Derecho (OD)", "od")
+    with col_der:
+        incap_oi, grados_oi = procesar_panel_ojo("Ojo Izquierdo (OI)", "oi")
+
+st.divider()
+
+# ==========================================
+# DICTAMEN FINAL Y PDF
+# ==========================================
+st.header("📋 Dictamen Legal y Exportación")
+
+# Campo Editable para el nombre del paciente
+nombre_final = st.text_input("Paciente (Extraído automáticamente o ingréselo manual):", value=st.session_state.nombre_paciente)
+
+incap_total_bilateral = 0.0
+
+if modo_evaluacion == "Bilateral (OD y OI)":
+    if incap_od > 0 or incap_oi > 0:
+        suma_aritmetica = incap_od + incap_oi
+        incap_total_bilateral = suma_aritmetica * 1.5
+        
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Suma Aritmética", f"{suma_aritmetica:.2f}%")
+        c2.metric("Factor Bilateralidad", "x 1.5")
+        c3.metric("INCAPACIDAD TOTAL", f"{incap_total_bilateral:.2f}%")
+else:
+    if incap_od > 0:
+        st.metric("INCAPACIDAD UNILATERAL", f"{incap_od:.2f}%")
+
+if incap_od > 0 or incap_oi > 0:
+    # Botón PDF
+    b64_pdf = generar_pdf_moderno(nombre_final, incap_od, grados_od, incap_oi, grados_oi, incap_total_bilateral, modo_evaluacion)
+    
+    # Diseño de botón grande azul
+    html_btn = f'''
+    <a href="data:application/pdf;base64,{b64_pdf}" download="Dictamen_{nombre_final.replace(" ", "_")}.pdf" style="display: block; padding: 15px; background-color: #2980b9; color: white; text-align: center; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 18px; margin-top: 20px;">
+        📥 DESCARGAR INFORME PERICIAL PDF
+    </a>
+    '''
+    st.markdown(html_btn, unsafe_allow_html=True)
