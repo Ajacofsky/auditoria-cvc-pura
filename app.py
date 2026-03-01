@@ -2,24 +2,49 @@ import streamlit as st
 import cv2
 import numpy as np
 import math
+import re
+import base64
+from datetime import datetime
 from PIL import Image
 from fpdf import FPDF
-import base64
+import pytesseract
 
 st.set_page_config(page_title="Calculadora Pericial CVC", layout="wide")
 
 st.title("⚖️ Calculadora Pericial CVC (Área Central 40°)")
 st.markdown("""
-**Motor de Detección con Auditoría Humana y Reporte PDF**
-- Aísla la zona central (Universo de 104 puntos).
-- El perito tiene la última palabra sobre el conteo final.
-- Cálculo automático de bilateralidad y exportación legal.
+**Suite de Dictamen Médico-Legal**
+- Motor de detección blindado (Universo de 104 puntos).
+- Lector óptico automático de datos del paciente.
+- Panel de auditoría humana y exportación de dictamen en PDF.
 """)
 
 # ==========================================
-# 🔒 MOTOR DE VISIÓN BLINDADO 104
+# 🔒 MOTOR DE LECTURA (NUEVO)
 # ==========================================
+def extraer_nombre(img_gray):
+    """Escanea el 25% superior de la hoja para extraer el nombre del paciente."""
+    try:
+        alto, ancho = img_gray.shape
+        header_img = img_gray[0:int(alto*0.25), :]
+        # Mejorar el contraste para que la computadora lea mejor las letras
+        _, thresh_ocr = cv2.threshold(header_img, 150, 255, cv2.THRESH_BINARY)
+        
+        texto = pytesseract.image_to_string(thresh_ocr)
+        
+        # Buscar la palabra NOMBRE y capturar las palabras siguientes
+        match = re.search(r'NOMBRE\s+([A-Z\s]+)', texto, re.IGNORECASE)
+        if match:
+            # Limpiar espacios en blanco excesivos
+            nombre_limpio = re.sub(r'\s+', ' ', match.group(1)).strip()
+            return nombre_limpio
+        return ""
+    except Exception as e:
+        return "" # Si falla el motor de lectura, no detiene la app
 
+# ==========================================
+# 🔒 MOTOR DE VISIÓN BLINDADO 
+# ==========================================
 def find_and_clean_axes(thresh):
     alto, ancho = thresh.shape
     zona_media_y = thresh[int(alto*0.25):int(alto*0.75), :]
@@ -31,7 +56,6 @@ def find_and_clean_axes(thresh):
     k_len = max(20, int(ancho * 0.1))
     kernel_h_clean = cv2.getStructuringElement(cv2.MORPH_RECT, (k_len, 1))
     lineas_h_puras = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel_h_clean)
-    
     k_len_v = max(20, int(alto * 0.1))
     kernel_v_clean = cv2.getStructuringElement(cv2.MORPH_RECT, (1, k_len_v))
     lineas_v_puras = cv2.morphologyEx(thresh, cv2.MORPH_OPEN, kernel_v_clean)
@@ -103,48 +127,92 @@ def detect_and_classify_symbols(img_bin, borrador_anti_regla, centro, pixels_por
     return img_auditoria, cuadrados_count, circulos_count
 
 # ==========================================
-# GENERADOR DE PDF 
+# GENERADOR DE PDF MODERNO
 # ==========================================
-
-def generar_pdf_base64(incap_od, incap_oi, incap_total, modo):
+def generar_pdf_moderno(nombre_paciente, incap_od, grados_od, incap_oi, grados_oi, incap_total, modo):
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_font("Arial", 'B', 16)
-    pdf.cell(0, 10, "DICTAMEN PERICIAL - CAMPO VISUAL COMPUTARIZADO", ln=True, align='C')
-    pdf.ln(10)
     
-    pdf.set_font("Arial", '', 12)
-    pdf.cell(0, 10, "Metodologia: Analisis del area central (40 grados), base 104 estimulos.", ln=True)
+    # 1. Encabezado Moderno (Fondo Azul Marino)
+    pdf.set_fill_color(41, 64, 115) # Azul oscuro profesional
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font("Arial", 'B', 15)
+    pdf.cell(0, 16, "  DICTAMEN PERICIAL - CAMPO VISUAL COMPUTARIZADO", 0, 1, 'L', fill=True)
     pdf.ln(5)
     
-    if modo == "Unilateral (1 Ojo)":
-        ojo_str = "Derecho (OD)" if incap_od > 0 else "Izquierdo (OI)"
-        incap_val = incap_od if incap_od > 0 else incap_oi
-        pdf.cell(0, 10, f"Ojo Evaluado: {ojo_str}", ln=True)
-        pdf.set_font("Arial", 'B', 14)
-        pdf.cell(0, 10, f"Incapacidad Unilateral Validada: {incap_val:.2f}%", ln=True)
-    else:
-        pdf.cell(0, 10, f"Incapacidad Unilateral Ojo Derecho (OD): {incap_od:.2f}%", ln=True)
-        pdf.cell(0, 10, f"Incapacidad Unilateral Ojo Izquierdo (OI): {incap_oi:.2f}%", ln=True)
-        pdf.ln(5)
-        pdf.cell(0, 10, f"Suma Aritmetica (OD + OI): {(incap_od + incap_oi):.2f}%", ln=True)
-        pdf.cell(0, 10, f"Factor de Bilateralidad Aplicado: x 1.5", ln=True)
-        pdf.ln(5)
-        pdf.set_font("Arial", 'B', 14)
-        pdf.cell(0, 10, f"INCAPACIDAD TOTAL BILATERAL: {incap_total:.2f}%", ln=True)
+    # 2. Bloque de Datos del Paciente (Gris claro)
+    pdf.set_fill_color(240, 240, 240)
+    pdf.set_text_color(0, 0, 0)
+    
+    pdf.set_font("Arial", 'B', 11)
+    pdf.cell(30, 10, " Paciente:", 0, 0, 'L', fill=True)
+    pdf.set_font("Arial", '', 11)
+    pdf.cell(90, 10, f" {nombre_paciente.upper()}", 0, 0, 'L', fill=True)
+    
+    pdf.set_font("Arial", 'B', 11)
+    pdf.cell(20, 10, " Fecha:", 0, 0, 'L', fill=True)
+    pdf.set_font("Arial", '', 11)
+    fecha_hoy = datetime.now().strftime("%d/%m/%Y")
+    pdf.cell(0, 10, f" {fecha_hoy}", 0, 1, 'L', fill=True)
+    
+    pdf.set_draw_color(200, 200, 200)
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+    pdf.ln(10)
+    
+    # 3. Resultados Oculares
+    pdf.set_font("Arial", 'B', 14)
+    pdf.cell(0, 10, "RESULTADOS DE LA EVALUACIÓN (ÁREA 40 GRADOS)", 0, 1, 'L')
+    pdf.ln(2)
+    
+    if incap_od > 0:
+        pdf.set_fill_color(235, 245, 255) # Celeste muy claro
+        pdf.set_font("Arial", 'B', 12)
+        pdf.cell(0, 10, " OJO DERECHO (OD)", 0, 1, 'L', fill=True)
+        pdf.set_font("Arial", '', 11)
+        pdf.cell(0, 8, f"   - Grados de pérdida visual:  {grados_od:.1f} grados", 0, 1)
+        pdf.cell(0, 8, f"   - Incapacidad Unilateral:    {incap_od:.2f}%", 0, 1)
+        pdf.ln(4)
         
-    pdf.ln(30)
-    pdf.set_font("Arial", '', 12)
-    pdf.cell(0, 10, "_____________________________________________________", ln=True, align='C')
-    pdf.cell(0, 10, "Firma y Sello del Perito Medico", ln=True, align='C')
+    if incap_oi > 0:
+        pdf.set_fill_color(235, 245, 255)
+        pdf.set_font("Arial", 'B', 12)
+        pdf.cell(0, 10, " OJO IZQUIERDO (OI)", 0, 1, 'L', fill=True)
+        pdf.set_font("Arial", '', 11)
+        pdf.cell(0, 8, f"   - Grados de pérdida visual:  {grados_oi:.1f} grados", 0, 1)
+        pdf.cell(0, 8, f"   - Incapacidad Unilateral:    {incap_oi:.2f}%", 0, 1)
+        pdf.ln(4)
+        
+    # 4. Bloque de Incapacidad Total
+    pdf.ln(10)
+    pdf.set_font("Arial", 'B', 14)
+    if modo == "Bilateral (OD y OI)":
+        pdf.set_fill_color(46, 134, 193) # Azul más vivo
+        pdf.set_text_color(255, 255, 255)
+        pdf.cell(0, 14, f" INCAPACIDAD TOTAL BILATERAL: {incap_total:.2f}%", 0, 1, 'C', fill=True)
+    else:
+        pdf.set_fill_color(46, 134, 193)
+        pdf.set_text_color(255, 255, 255)
+        val = incap_od if incap_od > 0 else incap_oi
+        pdf.cell(0, 14, f" INCAPACIDAD UNILATERAL DEFINITIVA: {val:.2f}%", 0, 1, 'C', fill=True)
+        
+    # 5. Firma
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(45)
+    pdf.set_draw_color(0, 0, 0)
+    pdf.line(65, pdf.get_y(), 145, pdf.get_y())
+    pdf.set_font("Arial", '', 10)
+    pdf.cell(0, 5, "Firma y Sello del Perito Médico", 0, 1, 'C')
     
     pdf_bytes = pdf.output(dest='S').encode('latin-1')
-    b64 = base64.b64encode(pdf_bytes).decode()
-    return b64
+    return base64.b64encode(pdf_bytes).decode()
 
 # ==========================================
 # INTERFAZ WEB (`app.py`)
 # ==========================================
+
+# Guardar el nombre en la memoria temporal
+if "nombre_paciente" not in st.session_state:
+    st.session_state.nombre_paciente = ""
 
 modo_evaluacion = st.radio("Seleccione el Tipo de Evaluación:", ["Unilateral (1 Ojo)", "Bilateral (OD y OI)"], horizontal=True)
 st.divider()
@@ -152,6 +220,7 @@ st.divider()
 def procesar_panel_ojo(titulo_ojo, key_suffix):
     archivo = st.file_uploader(f"Subir estudio - {titulo_ojo}", type=["jpg", "jpeg", "png"], key=f"file_{key_suffix}")
     incapacidad_final = 0.0
+    grados_finales = 0.0
     
     if archivo is not None:
         with st.spinner(f"Escaneando {titulo_ojo}..."):
@@ -159,6 +228,12 @@ def procesar_panel_ojo(titulo_ojo, key_suffix):
             img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             _, thresh = cv2.threshold(gray, 180, 255, cv2.THRESH_BINARY_INV)
+            
+            # Auto-extracción del nombre solo en el primer estudio que se suba
+            if st.session_state.nombre_paciente == "":
+                nombre_detectado = extraer_nombre(gray)
+                if nombre_detectado:
+                    st.session_state.nombre_paciente = nombre_detectado
             
             centro, borrador_anti_regla, dist_60 = find_and_clean_axes(thresh)
             pixels_por_10_grados = float(dist_60 / 6.0)
@@ -170,62 +245,4 @@ def procesar_panel_ojo(titulo_ojo, key_suffix):
                 mask = img_auditoria_bin[:,:,i] != 255
                 img_final[mask, i] = img_auditoria_bin[mask, i]
                 
-            cv2.circle(img_final, centro, int(4.0 * pixels_por_10_grados), (0, 165, 255), 3)
-
-            # INTERFAZ DEL PANEL
-            st.image(Image.fromarray(cv2.cvtColor(img_final, cv2.COLOR_BGR2RGB)), caption=f"Auditoría {titulo_ojo}", use_container_width=True)
-            
-            st.markdown(f"**Corrección Pericial - {titulo_ojo}**")
-            col_a, col_b = st.columns(2)
-            with col_a:
-                cuadrados_final = st.number_input("Cuadrados Reales:", min_value=0, max_value=104, value=t_cuad, step=1, key=f"cuad_{key_suffix}")
-            with col_b:
-                circulos_final = st.number_input("Círculos Reales:", min_value=0, max_value=104, value=t_circ, step=1, key=f"circ_{key_suffix}")
-                
-            grados_no_vistos = (cuadrados_final / 104.0) * 320.0
-            incapacidad_final = (grados_no_vistos / 320.0) * 100 * 0.25
-            
-            st.metric(f"Incapacidad {titulo_ojo}", f"{incapacidad_final:.2f}%")
-            
-    return incapacidad_final
-
-# Layout de columnas
-if modo_evaluacion == "Unilateral (1 Ojo)":
-    incap_od = procesar_panel_ojo("Ojo Evaluado", "unico")
-    incap_oi = 0.0
-else:
-    col_izq, col_der = st.columns(2)
-    with col_izq:
-        incap_od = procesar_panel_ojo("Ojo Derecho (OD)", "od")
-    with col_der:
-        incap_oi = procesar_panel_ojo("Ojo Izquierdo (OI)", "oi")
-
-st.divider()
-
-# ==========================================
-# DICTAMEN FINAL Y PDF
-# ==========================================
-st.header("📋 Dictamen Legal Final")
-
-incap_total_bilateral = 0.0
-
-if modo_evaluacion == "Bilateral (OD y OI)":
-    if incap_od > 0 or incap_oi > 0:
-        suma_aritmetica = incap_od + incap_oi
-        incap_total_bilateral = suma_aritmetica * 1.5
-        
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Suma Aritmética", f"{suma_aritmetica:.2f}%")
-        c2.metric("Factor Bilateralidad", "x 1.5")
-        c3.metric("INCAPACIDAD TOTAL", f"{incap_total_bilateral:.2f}%")
-    else:
-        st.info("Suba al menos una imagen para ver el cálculo final.")
-else:
-    if incap_od > 0:
-        st.metric("INCAPACIDAD UNILATERAL", f"{incap_od:.2f}%")
-
-# Botón de Descarga PDF
-if incap_od > 0 or incap_oi > 0:
-    b64_pdf = generar_pdf_base64(incap_od, incap_oi, incap_total_bilateral, modo_evaluacion)
-    href = f'<a href="data:application/pdf;base64,{b64_pdf}" download="Dictamen_Pericial_CVC.pdf" style="display: inline-block; padding: 10px 20px; background-color: #4CAF50; color: white; text-align: center; text-decoration: none; border-radius: 5px; font-weight: bold;">📥 Descargar Informe PDF</a>'
-    st.markdown(href, unsafe_allow_html=True)
+            cv2.circle(img_final, centro, int
