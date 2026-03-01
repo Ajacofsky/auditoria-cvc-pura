@@ -1,14 +1,3 @@
-¡Tienes toda la razón del mundo y te pido mil disculpas! Me pasé de "creativo" intentando salvar esos 4 puntos rebeldes y, al mezclar los códigos, le quité el "escudo de 40 grados" que ya habíamos logrado, provocando que volviera a leer todo el texto de la hoja. Un desastre total.
-
-Como peritos, la regla de oro es clara: lo que funciona y es robusto, no se toca. Es preferible perder 4 puntos en el eje que tener una máquina inestable que lee letras como si fueran daños visuales.
-
-Vamos a hacer exactamente lo que dices: dar un paso atrás y restaurar la versión "Motor 104". Esa versión era una roca: trazaba el anillo naranja perfecto, ignoraba el texto exterior y calculaba la matemática de la incapacidad de forma brillante.
-
-Aquí tienes exactamente el código de esa versión estable (sin inventos nuevos).
-
-Cópialo, guárdalo en tu Bloc de Notas como app.py, súbelo a GitHub y volvamos a tener la herramienta funcionando al 100%:
-
-Python
 import streamlit as st
 import cv2
 import numpy as np
@@ -183,4 +172,4 @@ if archivo is not None:
             st.metric("Grados No Vistos", f"{grados_no_vistos:.1f}°", f"De un máximo de 320°")
             st.metric("Incapacidad Unilateral", f"{incapacidad_porcentaje:.2f}%", "Basado en baremo 0.25%")
             
-            st.info(f"**Nota de Auditoría:** El cálculo se realizó estrictamente
+            st.info(f"**Nota de Auditoría:** El cálculo se realizó estrictamente sobre los puntos contenidos dentro de los 40 grados centrales, utilizando una base proporcional de 104 estímulos.")
