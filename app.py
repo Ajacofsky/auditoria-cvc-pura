@@ -139,4 +139,35 @@ if archivo is not None:
         cv2.line(img_final, (centro[0], 0), (centro[0], alto), (255, 0, 0), 1)
         
         radio_40_px = int(4.0 * pixels_por_10_grados)
-        cv2.circle(img_final, centro, radio_40_px, (0, 16
+        cv2.circle(img_final, centro, radio_40_px, (0, 165, 255), 3)
+
+        # ------------------------------------------
+        # MOTOR MATEMÁTICO PERICIAL
+        # ------------------------------------------
+        total_puntos_area = t_cuad + t_circ
+        base_calculo = 104.0 
+        grados_no_vistos = (t_cuad / base_calculo) * 320.0
+        incapacidad_porcentaje = (grados_no_vistos / 320.0) * 100 * 0.25
+
+        # ------------------------------------------
+        # MOSTRAR RESULTADOS
+        # ------------------------------------------
+        col1, col2 = st.columns([3, 2])
+        with col1:
+            img_rgb = cv2.cvtColor(img_final, cv2.COLOR_BGR2RGB)
+            st.image(Image.fromarray(img_rgb), caption="Auditoría Visual (Anillo Naranja = 40°)", use_container_width=True)
+        with col2:
+            st.markdown("### 📊 Informe Matemático")
+            
+            st.markdown("**Conteo de Estímulos (≤ 40°):**")
+            c1, c2 = st.columns(2)
+            c1.metric("Cuadrados (Fallados)", t_cuad)
+            c2.metric("Círculos (Vistos)", t_circ)
+            
+            st.divider()
+            
+            st.markdown("**Cálculo Legal:**")
+            st.metric("Grados No Vistos", f"{grados_no_vistos:.1f}°", f"De un máximo de 320°")
+            st.metric("Incapacidad Unilateral", f"{incapacidad_porcentaje:.2f}%", "Basado en baremo 0.25%")
+            
+            st.info(f"**Nota de Auditoría:** El cálculo se realizó estrictamente sobre los puntos contenidos dentro de los 40 grados centrales, utilizando una base proporcional de 104 estímulos.")
