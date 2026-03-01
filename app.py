@@ -17,7 +17,7 @@ st.markdown("""
 """)
 
 # ==========================================
-# 🔒 MOTOR DE VISIÓN BLINDADO 
+# 🔒 MOTOR DE VISIÓN BLINDADO 104
 # ==========================================
 
 def find_and_clean_axes(thresh):
