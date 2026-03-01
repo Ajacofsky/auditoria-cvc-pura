@@ -128,4 +128,48 @@ if archivo is not None:
     with st.spinner("Mapeando el área central de 40 grados..."):
         
         nparr = np.frombuffer(archivo.getvalue(), np.uint8)
-        img = cv2.imdecode(nparr,
+        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        _, thresh = cv2.threshold(gray, 180, 255, cv2.THRESH_BINARY_INV)
+        alto, ancho = thresh.shape
+
+        # 1. Encontrar ejes y matemática de la escala
+        centro, borrador_anti_regla, dist_60 = find_and_clean_axes(thresh)
+        pixels_por_10_grados = float(dist_60 / 6.0)
+        
+        # 2. Detección Exclusiva 40°
+        img_auditoria_bin, t_cuad, t_circ = detect_and_classify_symbols(thresh, borrador_anti_regla, centro, pixels_por_10_grados)
+        
+        # 3. Fusión visual (Pintar sobre la imagen original)
+        img_final = img.copy()
+        for i in range(3):
+            mask = img_auditoria_bin[:,:,i] != 255
+            img_final[mask, i] = img_auditoria_bin[mask, i]
+            
+        # Dibujar Centro (Azul)
+        cv2.line(img_final, (0, centro[1]), (ancho, centro[1]), (255, 0, 0), 1)
+        cv2.line(img_final, (centro[0], 0), (centro[0], alto), (255, 0, 0), 1)
+        
+        # Dibujar Frontera Legal de 40° (Naranja grueso)
+        radio_40_px = int(4.0 * pixels_por_10_grados)
+        cv2.circle(img_final, centro, radio_40_px, (0, 165, 255), 3)
+
+        # MOSTRAR RESULTADOS
+        col1, col2 = st.columns([3, 1])
+        with col1:
+            img_rgb = cv2.cvtColor(img_final, cv2.COLOR_BGR2RGB)
+            st.image(Image.fromarray(img_rgb), caption="Auditoría Visual (Anillo Naranja = 40°)", use_container_width=True)
+        with col2:
+            st.markdown("---")
+            st.markdown("### 🔬 Conteo Área 40°")
+            
+            data = {"Cuadrados": [t_cuad], "Círculos": [t_circ]}
+            st.bar_chart(data)
+            
+            st.metric("Cuadrados (Rojos)", t_cuad)
+            st.metric("Círculos (Verdes)", t_circ)
+            st.write("---")
+            st.markdown("""
+            **Verificación Pericial:**
+            La computadora **ignora** cualquier símbolo u objeto (texto) que se encuentre por fuera del anillo naranja de los 40 grados, garantizando la zona legal del cálculo.
+            """)
