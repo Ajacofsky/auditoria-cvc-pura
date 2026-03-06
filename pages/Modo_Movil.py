@@ -14,7 +14,7 @@ st.title("📱 Escáner Móvil Pericial CVC")
 st.markdown("""
 **Modo Captura por Cámara**
 Tome una foto directa del campo visual impreso. 
-*💡 Consejo de Oro: Acerque la cámara para que **el papel blanco llene toda la pantalla**. Si se ve mucho fondo oscuro (el escritorio), la computadora podría confundirse.*
+*💡 Consejo de Oro: Acerque la cámara para que **el círculo del gráfico llene casi toda la pantalla**. Intente que no haya sombras muy fuertes sobre el papel.*
 """)
 
 # ==========================================
@@ -125,16 +125,16 @@ def generar_pdf_moderno(incap_od, grados_od, img_od_orig, incap_oi, grados_oi, i
     pdf.cell(0, 10, "RESULTADOS DE LA EVALUACION (AREA 40 GRADOS)", 0, 1, 'L')
     pdf.ln(2)
     
-    if incap_od > 0:
+    if incap_od > 0 or (modo == "Unilateral (1 Ojo)" and img_od_orig is not None):
         pdf.set_fill_color(235, 245, 255) 
         pdf.set_font("Arial", 'B', 12)
-        pdf.cell(0, 10, " OJO DERECHO (OD)", 0, 1, 'L', fill=True)
+        pdf.cell(0, 10, " OJO DERECHO (OD) / EVALUADO", 0, 1, 'L', fill=True)
         pdf.set_font("Arial", '', 11)
         pdf.cell(0, 8, f"   - Grados de perdida visual:  {grados_od:.1f} grados", 0, 1)
         pdf.cell(0, 8, f"   - Incapacidad Unilateral:    {incap_od:.2f}%", 0, 1)
         pdf.ln(3)
         
-    if incap_oi > 0:
+    if incap_oi > 0 or (modo == "Bilateral (OD y OI)" and img_oi_orig is not None):
         pdf.set_fill_color(235, 245, 255)
         pdf.set_font("Arial", 'B', 12)
         pdf.cell(0, 10, " OJO IZQUIERDO (OI)", 0, 1, 'L', fill=True)
@@ -176,15 +176,16 @@ def procesar_panel_camara(titulo_ojo, key_suffix):
     archivo = st.camera_input(f"📷 Capturar - {titulo_ojo}", key=f"cam_{key_suffix}")
     
     incapacidad_final, grados_finales, img_original = 0.0, 0.0, None
+    t_cuad, t_circ = 0, 0
     
     if archivo is not None:
-        with st.spinner(f"Analizando captura..."):
+        with st.spinner(f"Analizando captura (Limpiando sombras de la foto)..."):
             nparr = np.frombuffer(archivo.getvalue(), np.uint8)
             img_raw = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
             
-            # 🚀 COMPRESOR ÓPTICO: Achicar la foto del celular para que no colapse el servidor
+            # COMPRESOR ÓPTICO
             alto_raw, ancho_raw = img_raw.shape[:2]
-            max_dimension = 1200
+            max_dimension = 1000
             if ancho_raw > max_dimension or alto_raw > max_dimension:
                 escala = max_dimension / max(ancho_raw, alto_raw)
                 img = cv2.resize(img_raw, (int(ancho_raw * escala), int(alto_raw * escala)), interpolation=cv2.INTER_AREA)
@@ -195,9 +196,10 @@ def procesar_panel_camara(titulo_ojo, key_suffix):
             
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
             
-            # Filtro para suavizar sombras e iluminación dispar de las fotos de celular
-            gray_blur = cv2.GaussianBlur(gray, (5, 5), 0)
-            _, thresh = cv2.threshold(gray_blur, 150, 255, cv2.THRESH_BINARY_INV)
+            # MAGIA ANTI-SOMBRAS: Normaliza la luz de la foto y usa umbral inteligente
+            gray_norm = cv2.normalize(gray, None, 0, 255, cv2.NORM_MINMAX)
+            gray_blur = cv2.GaussianBlur(gray_norm, (5, 5), 0)
+            _, thresh = cv2.threshold(gray_blur, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
             
             try:
                 centro, borrador_anti_regla, dist_60 = find_and_clean_axes(thresh)
@@ -211,23 +213,24 @@ def procesar_panel_camara(titulo_ojo, key_suffix):
                     img_pantalla[mask, i] = img_auditoria_bin[mask, i]
                 cv2.circle(img_pantalla, centro, int(4.0 * pixels_por_10_grados), (0, 165, 255), 3)
 
+                st.success("✅ ¡Análisis completado!")
                 st.image(Image.fromarray(cv2.cvtColor(img_pantalla, cv2.COLOR_BGR2RGB)), caption=f"Auditoría Visual {titulo_ojo}", use_container_width=True)
                 
-                st.markdown(f"**Corrección Pericial**")
-                col_a, col_b = st.columns(2)
-                with col_a:
-                    cuadrados_final = st.number_input("Cuadrados (Fallados):", min_value=0, max_value=104, value=t_cuad, step=1, key=f"cuad_{key_suffix}")
-                with col_b:
-                    circulos_final = st.number_input("Círculos (Vistos):", min_value=0, max_value=104, value=t_circ, step=1, key=f"circ_{key_suffix}")
-                    
-                grados_finales = (cuadrados_final / 104.0) * 320.0
-                incapacidad_final = (grados_finales / 320.0) * 100 * 0.25
-                
-                st.success(f"Incapacidad {titulo_ojo}: {incapacidad_final:.2f}%")
-                
             except Exception as e:
-                # Si falla por una mala foto, ahora te avisará en rojo en lugar de quedarse congelado
-                st.error(f"⚠️ Error al escanear. Intente que la hoja ocupe toda la cámara, sin mucho fondo oscuro. Detalle técnico: {e}")
+                st.error(f"⚠️ La foto está demasiado inclinada o no se ve bien el gráfico completo. Intente tomarla más paralela al papel.")
+                
+            # EL PANEL MANUAL AHORA SIEMPRE SE MUESTRA, AUNQUE EL RESULTADO SEA 0
+            st.markdown(f"**Corrección Pericial Manual**")
+            col_a, col_b = st.columns(2)
+            with col_a:
+                cuadrados_final = st.number_input("Cuadrados (Fallados):", min_value=0, max_value=104, value=t_cuad, step=1, key=f"cuad_{key_suffix}")
+            with col_b:
+                circulos_final = st.number_input("Círculos (Vistos):", min_value=0, max_value=104, value=t_circ, step=1, key=f"circ_{key_suffix}")
+                
+            grados_finales = (cuadrados_final / 104.0) * 320.0
+            incapacidad_final = (grados_finales / 320.0) * 100 * 0.25
+            
+            st.info(f"👉 Incapacidad Detectada: {incapacidad_final:.2f}%")
             
     return incapacidad_final, grados_finales, img_original
 
@@ -252,15 +255,16 @@ nombre_archivo_input = st.text_input("Nombre del paciente para el archivo:", pla
 incap_total_bilateral = 0.0
 
 if modo_evaluacion == "Bilateral (OD y OI)":
-    if incap_od > 0 or incap_oi > 0:
+    if img_od_orig is not None or img_oi_orig is not None:
         suma_aritmetica = incap_od + incap_oi
         incap_total_bilateral = suma_aritmetica * 1.5
         st.metric("INCAPACIDAD TOTAL BILATERAL", f"{incap_total_bilateral:.2f}%")
 else:
-    if incap_od > 0:
+    if img_od_orig is not None:
         st.metric("INCAPACIDAD UNILATERAL", f"{incap_od:.2f}%")
 
-if incap_od > 0 or incap_oi > 0:
+# EL BOTÓN DE PDF AHORA APARECE SIEMPRE QUE SE HAYA TOMADO UNA FOTO (Incluso si da 0%)
+if img_od_orig is not None or img_oi_orig is not None:
     nombre_archivo = nombre_archivo_input.strip().replace(" ", "_") if nombre_archivo_input.strip() else "Dictamen"
         
     b64_pdf = generar_pdf_moderno(incap_od, grados_od, img_od_orig, incap_oi, grados_oi, img_oi_orig, incap_total_bilateral, modo_evaluacion)
