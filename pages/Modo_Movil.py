@@ -14,11 +14,11 @@ st.title("📱 Escáner Móvil Pericial CVC")
 st.markdown("""
 **Modo Captura por Cámara**
 Tome una foto directa del campo visual impreso. 
-*💡 Consejo: Intente que la hoja esté plana, bien iluminada y sin reflejos (sombras del celular).*
+*💡 Consejo de Oro: Acerque la cámara para que **el papel blanco llene toda la pantalla**. Si se ve mucho fondo oscuro (el escritorio), la computadora podría confundirse.*
 """)
 
 # ==========================================
-# 🔒 MOTOR DE VISIÓN BLINDADO (INTACTO)
+# 🔒 MOTOR DE VISIÓN BLINDADO 
 # ==========================================
 def find_and_clean_axes(thresh):
     alto, ancho = thresh.shape
@@ -173,7 +173,6 @@ modo_evaluacion = st.radio("Seleccione el Tipo de Evaluación:", ["Unilateral (1
 st.divider()
 
 def procesar_panel_camara(titulo_ojo, key_suffix):
-    # LA MAGIA ESTÁ AQUÍ: st.camera_input en lugar de file_uploader
     archivo = st.camera_input(f"📷 Capturar - {titulo_ojo}", key=f"cam_{key_suffix}")
     
     incapacidad_final, grados_finales, img_original = 0.0, 0.0, None
@@ -181,14 +180,24 @@ def procesar_panel_camara(titulo_ojo, key_suffix):
     if archivo is not None:
         with st.spinner(f"Analizando captura..."):
             nparr = np.frombuffer(archivo.getvalue(), np.uint8)
-            img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            img_raw = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
             
+            # 🚀 COMPRESOR ÓPTICO: Achicar la foto del celular para que no colapse el servidor
+            alto_raw, ancho_raw = img_raw.shape[:2]
+            max_dimension = 1200
+            if ancho_raw > max_dimension or alto_raw > max_dimension:
+                escala = max_dimension / max(ancho_raw, alto_raw)
+                img = cv2.resize(img_raw, (int(ancho_raw * escala), int(alto_raw * escala)), interpolation=cv2.INTER_AREA)
+            else:
+                img = img_raw
+
             img_original = img.copy()
             
             gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            # Como la iluminación de la cámara varía, aplicamos un filtro adaptativo suave primero
-            gray_blur = cv2.GaussianBlur(gray, (3, 3), 0)
-            _, thresh = cv2.threshold(gray_blur, 160, 255, cv2.THRESH_BINARY_INV)
+            
+            # Filtro para suavizar sombras e iluminación dispar de las fotos de celular
+            gray_blur = cv2.GaussianBlur(gray, (5, 5), 0)
+            _, thresh = cv2.threshold(gray_blur, 150, 255, cv2.THRESH_BINARY_INV)
             
             try:
                 centro, borrador_anti_regla, dist_60 = find_and_clean_axes(thresh)
@@ -215,8 +224,10 @@ def procesar_panel_camara(titulo_ojo, key_suffix):
                 incapacidad_final = (grados_finales / 320.0) * 100 * 0.25
                 
                 st.success(f"Incapacidad {titulo_ojo}: {incapacidad_final:.2f}%")
+                
             except Exception as e:
-                st.error("⚠️ No se pudo encuadrar correctamente el gráfico. Intente tomar la foto más cerca y plana.")
+                # Si falla por una mala foto, ahora te avisará en rojo en lugar de quedarse congelado
+                st.error(f"⚠️ Error al escanear. Intente que la hoja ocupe toda la cámara, sin mucho fondo oscuro. Detalle técnico: {e}")
             
     return incapacidad_final, grados_finales, img_original
 
